@@ -3,12 +3,13 @@
 微信界面美化模块（Xposed / LSPosed）。
 
 - 名称：**乐信** · lexin
-- 包名：**`io.github.jma28262lgtm.lexin`**（v1.0 起）
+- 包名：**`io.github.lex0m.lexin`**（v1.0 起）
 - 作者：**lex**
 - 许可证：**MIT**（见 [LICENSE](LICENSE)）
 
-> **包名变更说明**：早期版本使用 `com.sysprobe.svc`，自 v1.0 起统一为 `io.github.jma28262lgtm.lexin`。
-> 两个包名指向同一个模块。升级时请先卸载旧包、再安装新包，并在 LSPosed 中为新包重新勾选作用域（微信）。
+> **包名变更说明**：本模块先后使用过三个包名，均为同一模块：
+> `com.sysprobe.svc`（早期）→ `io.github.jma28262lgtm.lexin`（过渡）→ **`io.github.lex0m.lexin`**（现行）。
+> 升级时请先卸载旧包、再安装新包，并在 LSPosed 中为新包重新勾选作用域（微信）。
 
 
 ## 功能
