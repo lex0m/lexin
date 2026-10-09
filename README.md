@@ -3,7 +3,7 @@
 微信界面美化模块（Xposed / LSPosed）。
 
 - 作者：**lex**
-- 许可证：**GPL-3.0**（见 [LICENSE](LICENSE)）
+- 许可证：**MIT**（见 [LICENSE](LICENSE)）
 
 ## 功能
 
@@ -59,7 +59,7 @@ sh build.sh          # 产物：dist/lexin.apk
 - [WechatMagician](https://github.com/Gh0u1L5/WechatMagician)
 - [LSPosed](https://github.com/LSPosed/LSPosed)（运行框架）
 
-本项目以 GPL-3.0 发布，与所参考项目保持一致。
+本项目以 **MIT** 发布，为上述项目的**独立实现**（Java 语言重写，未复制其源代码），仅参考了实现思路与公开的 API 行为。若原作者认为存在不当引用，可随时联系调整。
 
 ## 免责声明
 
