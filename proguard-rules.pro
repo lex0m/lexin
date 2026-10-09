@@ -2,11 +2,11 @@
 
 # ── 入口 / 组件：框架按名字调用 ──────────────────────────────
 # LSPosed 读 assets/xposed_init 里的类名，加载后调它的 hook
--keep class com.sysprobe.svc.Entry { *; }
+-keep class io.github.jma28262lgtm.lexin.Entry { *; }
 # Activity、Provider 由框架按名字实例化
--keep class com.sysprobe.svc.SettingsActivity { *; }
--keep class com.sysprobe.svc.ThemeActivity { *; }
--keep class com.sysprobe.svc.BgProvider { *; }
+-keep class io.github.jma28262lgtm.lexin.SettingsActivity { *; }
+-keep class io.github.jma28262lgtm.lexin.ThemeActivity { *; }
+-keep class io.github.jma28262lgtm.lexin.BgProvider { *; }
 
 # Xposed 回调方法改名 = 静默失效
 -keepclassmembers class * extends de.robv.android.xposed.XC_MethodHook {
@@ -16,7 +16,7 @@
 -keep class * extends de.robv.android.xposed.XC_MethodHook { *; }
 
 # 我们自己在代码里按字符串查的类
--keep class com.sysprobe.svc.HostInfo { *; }
+-keep class io.github.jma28262lgtm.lexin.HostInfo { *; }
 
 # ── 混淆强度 ────────────────────────────────────────────────
 # 类名收进根包、抹掉内部类层级线索；被 keep 的类不受影响
