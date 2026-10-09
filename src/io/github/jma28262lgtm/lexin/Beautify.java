@@ -37,7 +37,7 @@ final class Beautify {
     private static final String T = "svc-beautify: ";
 
     /** 构建标记，每次编译递增，用来确认宿主跑的是哪个版本 */
-    static final String BUILD_TAG = "b52-rename-1520";
+    static final String BUILD_TAG = "1.0";
 
     // ── background ────────────────────────────────────────────────────────────
 

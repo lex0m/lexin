@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- LSPosed 作用域推荐：微信 -->
+    <string-array name="xposedscope">
+        <item>com.tencent.mm</item>
+    </string-array>
+</resources>

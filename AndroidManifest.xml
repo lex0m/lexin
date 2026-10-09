@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="io.github.jma28262lgtm.lexin"
-    android:versionCode="52"
+    android:versionCode="1"
     android:versionName="1.0">
 
     <uses-sdk android:minSdkVersion="28" android:targetSdkVersion="35" />
@@ -16,6 +16,8 @@
         <meta-data android:name="xposeddescription" android:value="@string/app_name" />
         <meta-data android:name="xposedminversion" android:value="82" />
         <meta-data android:name="xposedsharedprefs" android:value="true" />
+        <!-- 作用域声明：LSPosed 据此在作用域界面把微信列为推荐应用 -->
+        <meta-data android:name="xposedscope" android:resource="@array/xposedscope" />
 
         <!-- Settings screen. Runs in the module's own process; the hooks in the
              host process reach the same preferences through xposedsharedprefs. -->
