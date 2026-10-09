@@ -1,0 +1,40 @@
+# 构建中间产物
+build/
+dist/unsigned.apk
+*.apk.idsig
+
+# 签名私钥（绝不入库）
+keystore/
+*.ks
+*.jks
+*.keystore
+
+# 混淆映射（暴露内部结构，按需另存）
+mapping.txt
+
+# 开发期调试产物
+dump*/
+*-tree.txt
+chat-tree*.txt
+obf-dict.txt
+
+# 内部工作文档与工具（含本机路径、开发复盘、框架探测脚本，不对外）
+.old_prefs.xml
+PLAN.md
+PROJECT.md
+probe/
+check_lsposed.py
+theme-targets.txt
+
+# 系统
+.DS_Store
+*.log
+
+# 绝不上传：截图与任何图像证据
+screenshots/
+*.png.orig
+shot-*.png
+seq-*.png
+idle-*.png
+verify-*.png
+gh-*.png

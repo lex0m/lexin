@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.sysprobe.svc"
+    android:versionCode="51"
+    android:versionName="1.0">
+
+    <uses-sdk android:minSdkVersion="28" android:targetSdkVersion="35" />
+
+    <application
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:hasCode="true">
+
+        <meta-data android:name="xposedmodule" android:value="true" />
+        <meta-data android:name="xposeddescription" android:value="@string/app_name" />
+        <meta-data android:name="xposedminversion" android:value="82" />
+        <meta-data android:name="xposedsharedprefs" android:value="true" />
+
+        <!-- Settings screen. Runs in the module's own process; the hooks in the
+             host process reach the same preferences through xposedsharedprefs. -->
+        <activity
+            android:name=".SettingsActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar" />
+
+        <!-- Serves the chosen background to the hook side. The image lives in the
+             module's private dir (invisible to WeChat); this provider is the only
+             way the host process can read it without us writing into WeChat's own
+             storage. It exposes exactly one file and nothing else. -->
+        <provider
+            android:name=".BgProvider"
+            android:authorities="com.sysprobe.svc.bg"
+            android:exported="true"
+            android:grantUriPermissions="true" />
+
+        <!-- Appearance screen: second level, reached from the main menu. -->
+        <activity
+            android:name=".ThemeActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar" />
+
+    </application>
+
+</manifest>
