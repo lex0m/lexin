@@ -59,6 +59,30 @@ final class Assets {
         return drawable(shortName) != null;
     }
 
+    /** 读模块 APK 里的文本资源（锚点表 anchors.json 走这里）。 */
+    static String text(String path) {
+        InputStream in = null;
+        try {
+            AssetManager m = am;
+            if (m == null) return null;
+            in = m.open(path);
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream(64 * 1024);
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+            return new String(out.toByteArray(), "UTF-8");
+        } catch (Throwable ignored) {
+            return null;
+        } finally {
+            close(in);
+        }
+    }
+
+    /** 模块 APK 是否挂上了（面板用它判断能不能读锚点表）。 */
+    static boolean ready() {
+        return am != null;
+    }
+
     private static void close(InputStream in) {
         try {
             if (in != null) in.close();

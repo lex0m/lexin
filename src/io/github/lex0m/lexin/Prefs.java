@@ -16,6 +16,7 @@ final class Prefs {
     static final String K_THEME = Storage.K_THEME;
     static final String K_BG = Storage.K_BG;
     static final String K_BG_HOME = Storage.K_BG_HOME;
+    static final String K_SCAN = Storage.K_SCAN;
 
     /** ctx is ignored now - the store is file based and process independent. */
     static void init(Context ctx) {
@@ -24,6 +25,22 @@ final class Prefs {
 
     static boolean on(String key, boolean def) {
         return Storage.on(key, def);
+    }
+
+    /**
+     * 开关的默认值（唯一来源）。
+     *
+     * 保护类功能默认开：防撤回 / 朋友圈保留 / 去广告 / 自动原图 / 放宽限制；
+     * 会弹窗或改外观的默认关：骰子、猜拳、界面美化 —— 用户主动开才动界面。
+     */
+    static boolean def(String key) {
+        return K_RECALL.equals(key) || K_MOMENTS.equals(key) || K_ADS.equals(key)
+                || K_MEDIA.equals(key) || K_LIMITS.equals(key) || K_SCAN.equals(key);
+    }
+
+    /** 带默认值读取：hook 路径一律用这个，省得两处默认值写岔。 */
+    static boolean onDefault(String key) {
+        return on(key, def(key));
     }
 
     static void setOn(String key, boolean value) {

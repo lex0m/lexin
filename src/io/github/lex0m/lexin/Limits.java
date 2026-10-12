@@ -20,6 +20,8 @@ final class Limits {
         n += widenMethod(cl, "com.tencent.mm.ui.chatting.adapter.k", "Z0");
         n += widenField(cl, "com.tencent.mm.plugin.textstatus.ui.TextStatusDoWhatActivityV2", "p1");
 
+        Status.set("放宽本地限制", n > 0);
+        Status.note("放宽本地限制", n > 0 ? "已放宽 " + n + " 处上限" : "当前微信版本未适配（类名已变）");
         Log.d("svc-limits: armed=" + n);
     }
 
@@ -37,6 +39,7 @@ final class Limits {
                     XposedBridge.hookMethod(m, new XC_MethodHook() {
                         @Override
                         protected void afterHookedMethod(MethodHookParam p) {
+                            if (!Prefs.onDefault(Prefs.K_LIMITS)) return;
                             Object r = p.getResult();
                             if (r instanceof Integer && ((Integer) r) < WIDE) {
                                 p.setResult(WIDE);
@@ -67,6 +70,7 @@ final class Limits {
                 @Override
                 protected void afterHookedMethod(MethodHookParam p) {
                     try {
+                        if (!Prefs.onDefault(Prefs.K_LIMITS)) return;
                         if (((Integer) target.get(p.thisObject)) < WIDE) {
                             target.set(p.thisObject, WIDE);
                         }

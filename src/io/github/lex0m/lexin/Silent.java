@@ -50,6 +50,17 @@ final class Silent {
         return null;
     }
 
+    /** 沿父类链找方法：微信把 getItem / getItemView 这类方法放在基类上，只看声明会漏。 */
+    static Method anyMethodDeep(Class<?> owner, String name) {
+        Class<?> c = owner;
+        while (c != null && c != Object.class) {
+            Method m = anyMethod(c, name);
+            if (m != null) return m;
+            c = c.getSuperclass();
+        }
+        return null;
+    }
+
     static Field field(Class<?> owner, String name) {
         if (owner == null) return null;
         try {

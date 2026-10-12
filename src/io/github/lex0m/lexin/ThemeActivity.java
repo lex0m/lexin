@@ -34,6 +34,21 @@ public class ThemeActivity extends Activity {
     protected void onCreate(Bundle saved) {
         super.onCreate(saved);
         Storage.init(getApplicationContext());
+        if (Storage.num("disc_v", 0) < 1) {
+            // 与面板同一套免责声明：首次打开先读完再进界面
+            Prefs.init(getApplicationContext());
+            Disclaimer.gate(this, new Runnable() {
+                @Override
+                public void run() {
+                    buildUi();
+                }
+            });
+            return;
+        }
+        buildUi();
+    }
+
+    private void buildUi() {
 
         ScrollView scroll = new ScrollView(this);
         scroll.setBackgroundColor(Color.parseColor("#F6F6F8"));
@@ -44,7 +59,7 @@ public class ThemeActivity extends Activity {
         scroll.addView(root);
 
         root.addView(title("界面美化"));
-        root.addView(note("三项功能，全部只在本机渲染。改完重进界面即可看到效果。"));
+        root.addView(note("全部只在本机渲染，改完重进界面即可看到效果。"));
 
         // ── 总开关与背景 ──
         LinearLayout g0 = card(root);

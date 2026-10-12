@@ -18,6 +18,9 @@ JAVAC=$JH/bin/javac
 KEYTOOL=$JH/bin/keytool
 AAPT2=$PREFIX/bin/aapt2
 APKSIGNER=$PREFIX/bin/apksigner
+# Termux 已从本机卸载：$PREFIX/bin/apksigner 是包装脚本，shebang 指向 /data/data/com.termux/...
+# 跑不起来。jar 还在，直接用 java -jar 调它。
+APKSIGNER_JAR=${APKSIGNER_JAR:-$PREFIX/share/java/apksigner.jar}
 export JAVA_HOME=$JH
 export LD_LIBRARY_PATH=$PREFIX/lib
 
@@ -99,8 +102,14 @@ KS=$W/keystore/debug.ks
 [ -f "$KS" ] || "$KEYTOOL" -genkeypair -keystore "$KS" -alias k -keyalg RSA \
     -keysize 2048 -validity 10000 -storepass 123456 -keypass 123456 \
     -dname "CN=svc,OU=svc,O=svc" 2>/dev/null
-"$APKSIGNER" sign --ks "$KS" --ks-pass pass:123456 --key-pass pass:123456 \
-    --out "$OUT/lexin.apk" "$OUT/unsigned.apk" || exit 1
-"$APKSIGNER" verify --print-certs "$OUT/lexin.apk" | head -5
+if [ -f "$APKSIGNER_JAR" ]; then
+    "$JAVA" -jar "$APKSIGNER_JAR" sign --ks "$KS" --ks-pass pass:123456 \
+        --key-pass pass:123456 --out "$OUT/lexin.apk" "$OUT/unsigned.apk" || exit 1
+    "$JAVA" -jar "$APKSIGNER_JAR" verify --print-certs "$OUT/lexin.apk" | head -5
+else
+    "$APKSIGNER" sign --ks "$KS" --ks-pass pass:123456 --key-pass pass:123456 \
+        --out "$OUT/lexin.apk" "$OUT/unsigned.apk" || exit 1
+    "$APKSIGNER" verify --print-certs "$OUT/lexin.apk" | head -5
+fi
 su -c "cp -f $OUT/lexin.apk /data/local/tmp/lexin.apk" 2>/dev/null
 echo "DONE -> $OUT/lexin.apk  (installed copy: /data/local/tmp/lexin.apk)"

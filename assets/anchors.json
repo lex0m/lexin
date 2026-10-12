@@ -1,0 +1,284 @@
+{
+ "generated": "tools/gen-anchors.py",
+ "schema": 1,
+ "slots": {
+  "ad_appbrand": {
+   "method": "K2(*):boolean",
+   "pkg": "com.tencent.mm.plugin.appbrand",
+   "scan": true,
+   "simple": "^[a-z0-9]{1,3}$"
+  },
+  "ad_open": {
+   "method": "a(com.tencent.mm.plugin.appbrand.config.AppBrandInitConfigWC):boolean",
+   "pkg": "",
+   "scan": false,
+   "seed": [
+    "lc1.j"
+   ],
+   "simple": "^[a-z0-9]{1,4}$"
+  },
+  "care_mode": {
+   "exact": "com.tencent.mm.plugin.setting.ui.setting.SettingsCareModeIntro",
+   "scan": false
+  },
+  "chat_adapter": {
+   "pkg": "com.tencent.mm.ui.chatting.adapter",
+   "scan": false,
+   "seed": [
+    "com.tencent.mm.ui.chatting.adapter.k"
+   ],
+   "simple": "^[a-z0-9]{1,3}$"
+  },
+  "chat_binder": {
+   "method": "h(*,*,int,int,boolean,java.util.List):void",
+   "note": "同签名的绑定器很多，只认版本表/种子，不自动扫",
+   "pkg": "",
+   "scan": false,
+   "seed": [
+    "xl5.g"
+   ],
+   "simple": "^[a-z0-9]{1,4}$"
+  },
+  "emoji_panel": {
+   "method": "a(android.view.View,android.content.Context,int,*):void",
+   "pkg": "",
+   "scan": true,
+   "seed": [
+    "vr.p"
+   ],
+   "simple": "^[a-z0-9]{1,4}$"
+  },
+  "gallery": {
+   "exact": "com.tencent.mm.ui.chatting.gallery.ImageGalleryUI",
+   "scan": false
+  },
+  "msg": {
+   "fields": "field_msgSvrId,field_talker,field_isSend",
+   "pkg": "com.tencent.mm.storage",
+   "scan": true,
+   "simple": "^[a-z0-9]{1,4}$"
+  },
+  "qr_scan": {
+   "note": "WeKit 同款：改 QBarString 的 source/a8KeyScene，把相册/长按图片当相机处理",
+   "pkg": "",
+   "scan": false,
+   "shape": "activity_string_15_16",
+   "simple": "^.+$",
+   "strings": [
+    "MicroMsg.QBarStringHandler"
+   ]
+  },
+  "rng": {
+   "method": "Q(int,int):int",
+   "pkg": "com.tencent.mm.sdk.platformtools",
+   "scan": true,
+   "simple": "^[a-z0-9]{1,4}$"
+  },
+  "sns_ad": {
+   "fields": "AD_ACTION_TYPE_LANDING_PAGE,AD_ACTION_TYPE_WEB",
+   "method": "<init>(java.lang.String):void",
+   "note": "WeKit 同款思路：掐掉广告对象的构造，条目就不会进时间线",
+   "pkg": "com.tencent.mm.plugin.sns.storage",
+   "scan": true,
+   "seed": [
+    "com.tencent.mm.plugin.sns.storage.ADInfo"
+   ],
+   "simple": "^[A-Za-z0-9_$]{2,24}$"
+  },
+  "sns_db": {
+   "method": "A(java.lang.String,java.lang.String):boolean",
+   "multi": true,
+   "note": "一个版本里可能同时存在多个库对象，全挂上",
+   "pkg": "",
+   "scan": true,
+   "simple": "^[a-z0-9]{1,4}$"
+  },
+  "sns_db2": {
+   "method": "H(java.lang.String,java.lang.String,java.lang.Object[]):boolean",
+   "multi": true,
+   "note": "与 sns_db 同一批类，靠种子/表定位",
+   "pkg": "",
+   "scan": false,
+   "simple": "^[a-z0-9]{1,4}$"
+  },
+  "sport_detector": {
+   "note": "MMSportStepDetector：自己听计步器的那条路",
+   "pkg": "",
+   "scan": false,
+   "simple": "^.+$",
+   "strings": [
+    "MicroMsg.Sport.MMSportStepDetector"
+   ]
+  },
+  "sport_push_detector": {
+   "note": "PushSportStepDetector：推送链路听计步器的那条路",
+   "pkg": "",
+   "scan": false,
+   "simple": "^.+$",
+   "strings": [
+    "MicroMsg.Sport.PushSportStepDetector"
+   ]
+  },
+  "sport_util": {
+   "note": "SportUtil：小米机型上微信从这里取步数",
+   "pkg": "",
+   "scan": false,
+   "simple": "^.+$",
+   "strings": [
+    "content://com.miui.providers.steps/item"
+   ]
+  },
+  "sysmsg_parser": {
+   "method": "d(java.lang.String,java.lang.String,java.lang.String):java.util.Map",
+   "note": "8.0.70-8.0.79 均为 platformtools 下的短名类",
+   "pkg": "com.tencent.mm.sdk.platformtools",
+   "scan": true,
+   "simple": "^[a-z0-9]{1,4}$"
+  }
+ },
+ "versions": {
+  "8.0.72": {
+   "code": 3100,
+   "slots": {
+    "care_mode": "com.tencent.mm.plugin.setting.ui.setting.SettingsCareModeIntro",
+    "chat_adapter": "com.tencent.mm.ui.chatting.adapter.k",
+    "emoji_panel": "br.k0",
+    "gallery": "com.tencent.mm.ui.chatting.gallery.ImageGalleryUI",
+    "msg": "com.tencent.mm.storage.f9",
+    "qr_scan": "ry3.p",
+    "sns_ad": "com.tencent.mm.plugin.sns.storage.ADInfo",
+    "sport_detector": "com.tencent.mm.plugin.sport.model.h",
+    "sport_push_detector": "com.tencent.mm.plugin.sport.model.m",
+    "sport_util": "com.tencent.mm.plugin.sport.model.c0",
+    "sysmsg_parser": "com.tencent.mm.sdk.platformtools.aa"
+   }
+  },
+  "8.0.74": {
+   "code": 3120,
+   "slots": {
+    "care_mode": "com.tencent.mm.plugin.setting.ui.setting.SettingsCareModeIntro",
+    "chat_adapter": "com.tencent.mm.ui.chatting.adapter.k",
+    "emoji_panel": "lr.p",
+    "gallery": "com.tencent.mm.ui.chatting.gallery.ImageGalleryUI",
+    "msg": "com.tencent.mm.storage.f9",
+    "qr_scan": "e04.p",
+    "sns_ad": "com.tencent.mm.plugin.sns.storage.ADInfo",
+    "sns_db": [
+     "d95.b0",
+     "d95.z"
+    ],
+    "sns_db2": [
+     "d95.b0",
+     "d95.z"
+    ],
+    "sport_detector": "com.tencent.mm.plugin.sport.model.h",
+    "sport_push_detector": "com.tencent.mm.plugin.sport.model.m",
+    "sport_util": "com.tencent.mm.plugin.sport.model.c0",
+    "sysmsg_parser": "com.tencent.mm.sdk.platformtools.aa"
+   }
+  },
+  "8.0.76": {
+   "code": 3140,
+   "slots": {
+    "care_mode": "com.tencent.mm.plugin.setting.ui.setting.SettingsCareModeIntro",
+    "chat_adapter": "com.tencent.mm.ui.chatting.adapter.k",
+    "emoji_panel": "or.p",
+    "gallery": "com.tencent.mm.ui.chatting.gallery.ImageGalleryUI",
+    "msg": "com.tencent.mm.storage.e9",
+    "qr_scan": "h14.u",
+    "sns_ad": "com.tencent.mm.plugin.sns.storage.ADInfo",
+    "sns_db": [
+     "ka5.b0",
+     "ka5.z"
+    ],
+    "sns_db2": [
+     "ka5.b0",
+     "ka5.z"
+    ],
+    "sport_detector": "com.tencent.mm.plugin.sport.model.h",
+    "sport_push_detector": "com.tencent.mm.plugin.sport.model.m",
+    "sport_util": "com.tencent.mm.plugin.sport.model.c0",
+    "sysmsg_parser": "com.tencent.mm.sdk.platformtools.aa"
+   }
+  },
+  "8.0.77": {
+   "code": 3160,
+   "slots": {
+    "care_mode": "com.tencent.mm.plugin.setting.ui.setting.SettingsCareModeIntro",
+    "chat_adapter": "com.tencent.mm.ui.chatting.adapter.k",
+    "emoji_panel": "ur.p",
+    "gallery": "com.tencent.mm.ui.chatting.gallery.ImageGalleryUI",
+    "msg": "com.tencent.mm.storage.e9",
+    "qr_scan": "i44.u",
+    "rng": "com.tencent.mm.sdk.platformtools.v8",
+    "sns_ad": "com.tencent.mm.plugin.sns.storage.ADInfo",
+    "sns_db": [
+     "nd5.b0",
+     "nd5.z"
+    ],
+    "sns_db2": [
+     "nd5.b0",
+     "nd5.z"
+    ],
+    "sport_detector": "com.tencent.mm.plugin.sport.model.h",
+    "sport_push_detector": "com.tencent.mm.plugin.sport.model.m",
+    "sport_util": "com.tencent.mm.plugin.sport.model.c0",
+    "sysmsg_parser": "com.tencent.mm.sdk.platformtools.ca"
+   }
+  },
+  "8.0.78": {
+   "code": 3180,
+   "slots": {
+    "ad_appbrand": "com.tencent.mm.plugin.appbrand.d7",
+    "ad_open": "lc1.j",
+    "care_mode": "com.tencent.mm.plugin.setting.ui.setting.SettingsCareModeIntro",
+    "chat_adapter": "com.tencent.mm.ui.chatting.adapter.k",
+    "chat_binder": "xl5.g",
+    "emoji_panel": "vr.p",
+    "gallery": "com.tencent.mm.ui.chatting.gallery.ImageGalleryUI",
+    "msg": "com.tencent.mm.storage.e9",
+    "qr_scan": "v74.v",
+    "rng": "com.tencent.mm.sdk.platformtools.y8",
+    "sns_ad": "com.tencent.mm.plugin.sns.storage.ADInfo",
+    "sns_db": [
+     "kh5.b0",
+     "kh5.z"
+    ],
+    "sns_db2": [
+     "kh5.b0",
+     "kh5.z"
+    ],
+    "sport_detector": "com.tencent.mm.plugin.sport.model.h",
+    "sport_push_detector": "com.tencent.mm.plugin.sport.model.m",
+    "sport_util": "com.tencent.mm.plugin.sport.model.c0",
+    "sysmsg_parser": "com.tencent.mm.sdk.platformtools.fa"
+   }
+  },
+  "8.0.79": {
+   "code": 3200,
+   "slots": {
+    "ad_appbrand": "com.tencent.mm.plugin.appbrand.f7",
+    "care_mode": "com.tencent.mm.plugin.setting.ui.setting.SettingsCareModeIntro",
+    "chat_adapter": "com.tencent.mm.ui.chatting.adapter.k",
+    "emoji_panel": "vr.p",
+    "gallery": "com.tencent.mm.ui.chatting.gallery.ImageGalleryUI",
+    "msg": "com.tencent.mm.storage.e9",
+    "qr_scan": "p84.v",
+    "rng": "com.tencent.mm.sdk.platformtools.v8",
+    "sns_ad": "com.tencent.mm.plugin.sns.storage.ADInfo",
+    "sns_db": [
+     "ii5.b0",
+     "ii5.z"
+    ],
+    "sns_db2": [
+     "ii5.b0",
+     "ii5.z"
+    ],
+    "sport_detector": "com.tencent.mm.plugin.sport.model.h",
+    "sport_push_detector": "com.tencent.mm.plugin.sport.model.m",
+    "sport_util": "com.tencent.mm.plugin.sport.model.c0",
+    "sysmsg_parser": "com.tencent.mm.sdk.platformtools.da"
+   }
+  }
+ }
+}

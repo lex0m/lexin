@@ -3,35 +3,78 @@ package io.github.lex0m.lexin;
 import android.app.Activity;
 import android.app.Dialog;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
-import android.graphics.drawable.GradientDrawable;
-import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
-import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
-/** 设置面板：跑在宿主进程内的全屏对话框（跨进程读写配置在 Android 15 上走不通）。 */
+import java.util.Map;
+
+/**
+ * 设置面板：跑在宿主进程内的全屏对话框（跨进程读写配置在 Android 15 上走不通）。
+ *
+ * 版式：渐变标题卡 → 每日一言 → 交流群 → 适配状态 → 各功能分组卡片。
+ * 全部用代码画，配色和圆角统一走 Ui。
+ */
 final class SettingsPanel {
 
     private static final String T = "svc-ui: ";
+    private static final String GROUP_ID = "186737276";
+
     private static volatile boolean showing = false;
+    private static volatile Dialog current;
+
+    static boolean isShowing() {
+        return showing;
+    }
 
     static void show(final Activity host) {
-        if (host == null || showing) return;
+        if (host == null) return;
+        if (showing) {
+            // 标志位卡住（面板被系统收掉、页面被杀）会让入口"点了没反应"，所以自检一次
+            Dialog d = current;
+            if (d != null && d.isShowing()) return;
+            showing = false;
+        }
         try {
             Prefs.init(host);
-            build(host);
-        } catch (Throwable t) {
-            showing = false;
-            log("panel failed: " + t.getClass().getSimpleName());
+        } catch (Throwable ignored) {
+            // 读不到配置也照样把面板打开
         }
+        // 首次打开：强制看完免责声明与传播限制（读过就不再出现）
+        Disclaimer.gate(host, new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    log("gate passed, building panel");
+                    build(host);
+                    log("panel built, showing=" + showing);
+                } catch (Throwable t) {
+                    showing = false;
+                    String why = "panel failed: " + t.getClass().getSimpleName()
+                            + " " + t.getMessage();
+                    Storage.diag(why);
+                    log(why);
+                }
+            }
+        });
+    }
+
+    static void close() {
+        try {
+            Dialog d = current;
+            if (d != null) d.dismiss();
+        } catch (Throwable ignored) {
+            // 忽略
+        }
+        showing = false;
     }
 
     private static void build(final Activity host) {
@@ -40,67 +83,248 @@ final class SettingsPanel {
         final Dialog d = new Dialog(host,
                 android.R.style.Theme_DeviceDefault_Light_NoActionBar);
         d.requestWindowFeature(Window.FEATURE_NO_TITLE);
-
         Window w = d.getWindow();
         if (w != null) {
-            w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT);
-            w.setBackgroundDrawable(new ColorDrawable(Color.parseColor("#F6F6F8")));
+            w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+            w.setBackgroundDrawable(new ColorDrawable(Ui.BG));
         }
 
         ScrollView scroll = new ScrollView(host);
-        scroll.setBackgroundColor(Color.parseColor("#F6F6F8"));
+        scroll.setBackgroundColor(Ui.BG);
         scroll.setFillViewport(true);
 
-        LinearLayout root = new LinearLayout(host);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(host, 18), dp(host, 22) + statusBarPx(host), dp(host, 18), dp(host, 28));
+        LinearLayout root = Ui.page(host);
         scroll.addView(root);
 
-        root.addView(header(host, d, "系统服务组件"));
-        root.addView(note(host, "全部开关仅作用于本机，不发送任何数据"));
+        // ── 顶栏 ──
+        LinearLayout hero = Ui.hero(host, "乐信",
+                "欢迎使用乐信 · " + Anchors.summary(), "v" + version(host),
+                WxAccount.avatar(host), WxAccount.nickname(host),
+                new Runnable() {
+                    @Override
+                    public void run() {
+                        close();
+                    }
+                });
+        root.addView(hero);
 
-        // ── 分组 1：聊天行为 ──
-        LinearLayout g1 = card(host, root);
+        // ── 每日一言 ──
+        LinearLayout quote = Ui.card(host);
+        Ui.section(host, quote, "每日一言", Ui.GOLD);
+        final TextView qText = new TextView(host);
+        qText.setText("正在获取今天的句子…");
+        qText.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 13.5f);
+        qText.setTextColor(Ui.TEXT);
+        qText.setLineSpacing(Ui.dp(host, 4), 1.08f);
+        qText.setPadding(Ui.dp(host, 14), Ui.dp(host, 4), Ui.dp(host, 14), Ui.dp(host, 2));
+        quote.addView(qText);
+        final TextView qFrom = new TextView(host);
+        qFrom.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 11f);
+        qFrom.setTextColor(Ui.SUB);
+        qFrom.setPadding(Ui.dp(host, 14), 0, Ui.dp(host, 14), Ui.dp(host, 12));
+        quote.addView(qFrom);
+        root.addView(quote);
+        DailyQuote.load(host, new DailyQuote.Cb() {
+            @Override
+            public void on(final String text, final String from, boolean fresh) {
+                try {
+                    qText.setText("\u201C" + text + "\u201D");
+                    qFrom.setText("—— " + from + (fresh ? "" : "（本地）"));
+                } catch (Throwable ignored) {
+                    // 界面没了就算了
+                }
+            }
+        });
+
+        // ── 交流群 ──
+        LinearLayout group = Ui.card(host);
+        Ui.section(host, group, "交流群", Ui.ACCENT);
+        final TextView g = new TextView(host);
+        g.setText("欢迎加入交流群讨论（群号：" + GROUP_ID + "）");
+        g.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 13.5f);
+        g.setTextColor(Ui.ACCENT);
+        g.getPaint().setFakeBoldText(true);
+        g.setPadding(Ui.dp(host, 14), Ui.dp(host, 4), Ui.dp(host, 14), Ui.dp(host, 4));
+        g.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                try {
+                    android.content.ClipboardManager cm =
+                            (android.content.ClipboardManager) host.getSystemService(
+                                    Context.CLIPBOARD_SERVICE);
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("群号", GROUP_ID));
+                    toast(host, "群号已复制：" + GROUP_ID);
+                } catch (Throwable ignored) {
+                    toast(host, "群号：" + GROUP_ID);
+                }
+            }
+        });
+        group.addView(g);
+        Ui.infoRow(host, group, "点一下可以复制群号；有问题或建议欢迎进群反馈。", Ui.SUB);
+        root.addView(group);
+
+        // ── 适配状态 ──
+        LinearLayout st = Ui.card(host);
+        Ui.section(host, st, "当前微信适配状态", Ui.OK);
+        for (Map.Entry<String, Boolean> e : Status.all().entrySet()) {
+            st.addView(Ui.statusLine(host, e.getValue(), e.getKey(),
+                    e.getValue() ? "已生效" : "未适配（该功能自动跳过）"));
+        }
+        // actionRow 内部已经把这一行加进卡片了，这里不要再 addView 一次
+        Ui.actionRow(host, st, "独立设置页",
+                "打开乐信自己的设置页（不依赖微信）", Ui.OK, new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            android.content.Intent i = new android.content.Intent();
+                            i.setClassName("io.github.lex0m.lexin",
+                                    "io.github.lex0m.lexin.SettingsActivity");
+                            i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                            host.startActivity(i);
+                        } catch (Throwable ignored) {
+                            toast(host, "打不开，试试从 LSPosed 启动");
+                        }
+                    }
+                });
+        Ui.actionRow(host, st, "重新自动适配",
+                "清掉学习缓存，重新扫一遍微信 dex", Ui.OK, new Runnable() {
+                    @Override
+                    public void run() {
+                        Anchors.forget();
+                        AutoScan.schedule();
+                        toast(host, "已开始重新适配，稍后重启微信生效");
+                    }
+                });
+        root.addView(st);
+
+        // ── 功能分组 ──
+        LinearLayout g1 = Ui.card(host);
+        Ui.section(host, g1, "聊天行为", Ui.C_CHAT);
         addSwitch(host, g1, Prefs.K_RECALL, "消息防撤回",
-                "保留对方撤回的消息，并在气泡上标注");
+                "保留对方撤回的消息，并在气泡旁边标注方向", Ui.C_CHAT);
         addSwitch(host, g1, Prefs.K_MOMENTS, "朋友圈保留",
-                "对方删除的评论与动态，本地保留副本");
+                "对方删掉的评论与动态，本机留副本", Ui.C_CHAT);
         addSwitch(host, g1, Prefs.K_ADS, "屏蔽广告位",
-                "关闭开屏广告与评论区广告");
+                "关闭开屏、小程序与朋友圈信息流广告", Ui.C_CHAT);
+        root.addView(g1);
 
-        // ── 分组 2：本地限制与媒体 ──
-        LinearLayout g2 = card(host, root);
+        LinearLayout g2 = Ui.card(host);
+        Ui.section(host, g2, "本地限制与媒体", Ui.C_LOCAL);
         addSwitch(host, g2, Prefs.K_LIMITS, "放宽本地限制",
-                "放宽表情包数量、消息多选、状态字数上限");
+                "放宽表情包数量、消息多选、状态字数上限", Ui.C_LOCAL);
         addSwitch(host, g2, Prefs.K_MEDIA, "自动查看原图",
-                "浏览图片时自动切到原图，无需手动点");
+                "浏览图片时自动切到原图，无需手动点", Ui.C_LOCAL);
+        root.addView(g2);
 
-        // ── 分组 3：表情玩法 ──
-        LinearLayout g3 = card(host, root);
+        LinearLayout g3 = Ui.card(host);
+        Ui.section(host, g3, "表情玩法", Ui.C_PLAY);
         addSwitch(host, g3, Prefs.K_DICE, "骰子点数自选",
-                "长按表情面板的骰子可指定点数（或保持随机）");
+                "长按表情面板的骰子可指定点数（或保持随机）", Ui.C_PLAY);
         addSwitch(host, g3, Prefs.K_FIST, "猜拳结果自选",
-                "长按表情面板的猜拳可指定出拳");
+                "长按表情面板的猜拳可指定出拳", Ui.C_PLAY);
+        root.addView(g3);
 
-        // ── 分组 4：外观 ──
-        //
-        // 三块功能，各带自己的参数。面板跑在微信进程内，所以配置就存在微信的存储里。
-        LinearLayout g4 = card(host, root);
-        addSwitch(host, g4, Prefs.K_THEME, "启用界面美化", "总开关");
+        // ── 系统与隐私 ──
+        LinearLayout g6 = Ui.card(host);
+        Ui.section(host, g6, "系统与隐私", Ui.C_LOCAL);
+        addSwitch(host, g6, Prefs.K_SCAN, "解除扫码限制",
+                "相册、长按图片识别二维码不再受限（按相机场景处理）", Ui.C_LOCAL);
+        addSwitch(host, g6, Steps.K_ON, "运动步数修改",
+                "传感器层改写，微信侧零改动；当前：" + Steps.label(), Ui.C_LOCAL);
+        addAction(host, g6, "步数模式", STEP_MODE_LABELS[indexOf(Storage.num(Steps.K_MODE, 2), STEP_MODES)],
+                Ui.C_LOCAL, new Runnable() {
+                    @Override
+                    public void run() {
+                        choose(host, "步数模式", STEP_MODE_LABELS,
+                                indexOf(Storage.num(Steps.K_MODE, 2), STEP_MODES), new Pick() {
+                                    @Override
+                                    public void on(int i) {
+                                        Storage.setNum(Steps.K_MODE, STEP_MODES[i]);
+                                        Storage.setOn(Steps.K_ON, true);
+                                        toast(host, "已切换：" + STEP_MODE_LABELS[i] + "（重进微信生效）");
+                                    }
+                                });
+                    }
+                });
+        addAction(host, g6, "步数参数", stepParamLabel(), Ui.C_LOCAL, new Runnable() {
+            @Override
+            public void run() {
+                int mode = Storage.num(Steps.K_MODE, 2);
+                if (mode == 1) {
+                    final int[] vals = {12, 15, 20, 30, 50};
+                    final String[] labels = {"1.2 倍", "1.5 倍", "2 倍", "3 倍", "5 倍"};
+                    choose(host, "步数倍率", labels,
+                            indexOf(Storage.num(Steps.K_MUL, 15), vals), new Pick() {
+                                @Override
+                                public void on(int i) {
+                                    Storage.setNum(Steps.K_MUL, vals[i]);
+                                    Storage.setOn(Steps.K_ON, true);
+                                    toast(host, "倍率 " + labels[i] + "（重进微信生效）");
+                                }
+                            });
+                } else if (mode == 3) {
+                    final int[] vals = {6000, 8000, 10000, 12000, 15000, 20000, 30000};
+                    final String[] labels = {"6000", "8000", "10000", "12000", "15000", "20000", "30000"};
+                    choose(host, "今日目标步数", labels,
+                            indexOf(Storage.num(Steps.K_TARGET, 12000), vals), new Pick() {
+                                @Override
+                                public void on(int i) {
+                                    Storage.setNum(Steps.K_TARGET, vals[i]);
+                                    Storage.setOn(Steps.K_ON, true);
+                                    toast(host, "今日目标 " + labels[i] + " 步（重进微信生效）");
+                                }
+                            });
+                } else {
+                    final int[] vals = {100, 200, 300, 500, 800, 1200};
+                    final String[] labels = {"100", "200", "300", "500", "800", "1200"};
+                    choose(host, "每小时增加步数", labels,
+                            indexOf(Storage.num(Steps.K_RATE, 200), vals), new Pick() {
+                                @Override
+                                public void on(int i) {
+                                    Storage.setNum(Steps.K_RATE, vals[i]);
+                                    Storage.setOn(Steps.K_ON, true);
+                                    toast(host, "每小时 +" + labels[i] + " 步（重进微信生效）");
+                                }
+                            });
+                }
+            }
+        });
+        addAction(host, g6, "额外步数上限", Storage.num(Steps.K_CAP, 20000) + " 步", Ui.C_LOCAL,
+                new Runnable() {
+                    @Override
+                    public void run() {
+                        final int[] vals = {5000, 10000, 20000, 30000, 50000, 80000};
+                        final String[] labels = {"5000", "10000", "20000", "30000", "50000", "80000"};
+                        choose(host, "额外步数上限", labels,
+                                indexOf(Storage.num(Steps.K_CAP, 20000), vals), new Pick() {
+                                    @Override
+                                    public void on(int i) {
+                                        Storage.setNum(Steps.K_CAP, vals[i]);
+                                        toast(host, "上限 " + labels[i] + " 步（重进微信生效）");
+                                    }
+                                });
+                    }
+                });
+        Ui.infoRow(host, g6, "步数在传感器层改写，微信不碰；"
+                + "倍率按真实步数放大，自动增加/指定目标随一天时间平滑增长，"
+                + "超过上限就停在上限，避免数字离谱。", Ui.SUB);
+        root.addView(g6);
 
-        addAction(host, g4, "全屏背景", bgLabel(), new Runnable() {
+        // ── 外观 ──
+        LinearLayout g4 = Ui.card(host);
+        Ui.section(host, g4, "界面美化", Ui.C_SKIN);
+        addSwitch(host, g4, Prefs.K_THEME, "启用界面美化", "总开关", Ui.C_SKIN);
+        addAction(host, g4, "全屏背景", bgLabel(), Ui.C_SKIN, new Runnable() {
             @Override
             public void run() {
                 ImagePicker.pick(host, Beautify.K_BG);
             }
         });
-        addAction(host, g4, "背景透明度", alphaLabel(), new Runnable() {
+        addAction(host, g4, "背景透明度", alphaLabel(), Ui.C_SKIN, new Runnable() {
             @Override
             public void run() {
                 choose(host, "背景透明度", ALPHA_LABELS,
-                        indexOf(Storage.num(Beautify.K_BG_ALPHA, 200), ALPHAS),
-                        new Pick() {
+                        indexOf(Storage.num(Beautify.K_BG_ALPHA, 200), ALPHAS), new Pick() {
                             @Override
                             public void on(int i) {
                                 Storage.setNum(Beautify.K_BG_ALPHA, ALPHAS[i]);
@@ -110,12 +334,11 @@ final class SettingsPanel {
                         });
             }
         });
-        addAction(host, g4, "背景大小", modeLabel(), new Runnable() {
+        addAction(host, g4, "背景大小", modeLabel(), Ui.C_SKIN, new Runnable() {
             @Override
             public void run() {
                 choose(host, "背景大小", MODE_LABELS,
-                        indexOfName(Storage.str(Beautify.K_BG_MODE, "fill"), MODE_KEYS),
-                        new Pick() {
+                        indexOfName(Storage.str(Beautify.K_BG_MODE, "fill"), MODE_KEYS), new Pick() {
                             @Override
                             public void on(int i) {
                                 Storage.setStr(Beautify.K_BG_MODE, MODE_KEYS[i]);
@@ -126,13 +349,21 @@ final class SettingsPanel {
                         });
             }
         });
-        addAction(host, g4, "自定义尺寸", customLabel(), new Runnable() {
+        addAction(host, g4, "自定义尺寸", customLabel(), Ui.C_SKIN, new Runnable() {
             @Override
             public void run() {
                 askCustomSize(host);
             }
         });
-        addAction(host, g4, "清除背景", "恢复微信默认", new Runnable() {
+        addAction(host, g4, "背景裁剪", cropLabel(Beautify.K_BG_CX, Beautify.K_BG_CY,
+                Beautify.K_BG_CW, Beautify.K_BG_CH), Ui.C_SKIN, new Runnable() {
+            @Override
+            public void run() {
+                pickCrop(host, Beautify.K_BG_CX, Beautify.K_BG_CY,
+                        Beautify.K_BG_CW, Beautify.K_BG_CH);
+            }
+        });
+        addAction(host, g4, "清除背景", "恢复微信默认", Ui.C_SKIN, new Runnable() {
             @Override
             public void run() {
                 try {
@@ -146,59 +377,58 @@ final class SettingsPanel {
                 dismissAndReopen(host);
             }
         });
+        addSwitch(host, g4, Beautify.K_CORNER_ON, "UI 圆角化", "给界面容器加圆角", Ui.C_SKIN);
+        addAction(host, g4, "圆角半径", Storage.num(Beautify.K_CORNER_DP, 12) + "dp", Ui.C_SKIN,
+                new Runnable() {
+                    @Override
+                    public void run() {
+                        choose(host, "圆角半径", RADIUS_LABELS,
+                                indexOf(Storage.num(Beautify.K_CORNER_DP, 12), RADII), new Pick() {
+                                    @Override
+                                    public void on(int i) {
+                                        Storage.setNum(Beautify.K_CORNER_DP, RADII[i]);
+                                        Storage.setOn(Beautify.K_CORNER_ON, true);
+                                        Storage.setOn(Prefs.K_THEME, true);
+                                        toast(host, "圆角 " + RADIUS_LABELS[i] + "（重进界面生效）");
+                                    }
+                                });
+                    }
+                });
+        addSwitch(host, g4, Beautify.K_BLUR_ON, "毛玻璃", "GPU 模糊（Android 12+）", Ui.C_SKIN);
+        addAction(host, g4, "模糊强度", "半径 " + Storage.num(Beautify.K_BLUR_RADIUS, 20), Ui.C_SKIN,
+                new Runnable() {
+                    @Override
+                    public void run() {
+                        final String[] labels = new String[BLURS.length];
+                        for (int i = 0; i < BLURS.length; i++) labels[i] = String.valueOf(BLURS[i]);
+                        choose(host, "模糊强度", labels,
+                                indexOf(Storage.num(Beautify.K_BLUR_RADIUS, 20), BLURS), new Pick() {
+                                    @Override
+                                    public void on(int i) {
+                                        Storage.setNum(Beautify.K_BLUR_RADIUS, BLURS[i]);
+                                        Storage.setOn(Beautify.K_BLUR_ON, true);
+                                        Storage.setOn(Prefs.K_THEME, true);
+                                        toast(host, "模糊强度 " + labels[i] + "（重进界面生效）");
+                                    }
+                                });
+                    }
+                });
+        root.addView(g4);
 
-        addSwitch(host, g4, Beautify.K_CORNER_ON, "UI 圆角化", "给界面容器加圆角");
-        addAction(host, g4, "圆角半径", Storage.num(Beautify.K_CORNER_DP, 12) + "dp", new Runnable() {
-            @Override
-            public void run() {
-                choose(host, "圆角半径", RADIUS_LABELS,
-                        indexOf(Storage.num(Beautify.K_CORNER_DP, 12), RADII), new Pick() {
-                            @Override
-                            public void on(int i) {
-                                Storage.setNum(Beautify.K_CORNER_DP, RADII[i]);
-                                Storage.setOn(Beautify.K_CORNER_ON, true);
-                                Storage.setOn(Prefs.K_THEME, true);
-                                toast(host, "圆角 " + RADIUS_LABELS[i] + "（重进界面生效）");
-                            }
-                        });
-            }
-        });
-
-        addSwitch(host, g4, Beautify.K_BLUR_ON, "毛玻璃", "GPU 模糊（Android 12+）");
-        addAction(host, g4, "模糊强度", "半径 " + Storage.num(Beautify.K_BLUR_RADIUS, 20), new Runnable() {
-            @Override
-            public void run() {
-                final String[] labels = new String[BLURS.length];
-                for (int i = 0; i < BLURS.length; i++) labels[i] = String.valueOf(BLURS[i]);
-                choose(host, "模糊强度", labels,
-                        indexOf(Storage.num(Beautify.K_BLUR_RADIUS, 20), BLURS), new Pick() {
-                            @Override
-                            public void on(int i) {
-                                Storage.setNum(Beautify.K_BLUR_RADIUS, BLURS[i]);
-                                Storage.setOn(Beautify.K_BLUR_ON, true);
-                                Storage.setOn(Prefs.K_THEME, true);
-                                toast(host, "模糊强度 " + labels[i] + "（重进界面生效）");
-                            }
-                        });
-            }
-        });
-
-        // ── 分组 5：聊天行独立成卡 ──
-        //
-        // 第二层可以有自己的图、裁剪、模糊和透明度，列表行与壁纸的参数互不干扰。
-        LinearLayout g5 = card(host, root);
-        addSwitch(host, g5, Beautify.K_CARD_ON, "聊天条卡片化", "缩进留边、圆角、独立背景");
+        // ── 聊天条卡片化 ──
+        LinearLayout g5 = Ui.card(host);
+        Ui.section(host, g5, "聊天条卡片化", Ui.C_SKIN);
+        addSwitch(host, g5, Beautify.K_CARD_ON, "聊天条卡片化", "缩进留边、圆角、独立背景", Ui.C_SKIN);
         addSwitch(host, g5, Beautify.K_CARD_GLASS, "聊天条玻璃背景",
-                "全透明磨砂玻璃（透过聊天条看到背景，文字清晰）");
-
-        addAction(host, g5, "聊天条背景图", imgLabel(Beautify.K_CARD_IMG), new Runnable() {
+                "全透明磨砂玻璃（透过聊天条看到背景，文字清晰）", Ui.C_SKIN);
+        addAction(host, g5, "聊天条背景图", imgLabel(Beautify.K_CARD_IMG), Ui.C_SKIN, new Runnable() {
             @Override
             public void run() {
                 ImagePicker.pick(host, Beautify.K_CARD_IMG);
             }
         });
         addAction(host, g5, "聊天条裁剪", cropLabel(Beautify.K_CARD_CX, Beautify.K_CARD_CY,
-                Beautify.K_CARD_CW, Beautify.K_CARD_CH), new Runnable() {
+                Beautify.K_CARD_CW, Beautify.K_CARD_CH), Ui.C_SKIN, new Runnable() {
             @Override
             public void run() {
                 pickCrop(host, Beautify.K_CARD_CX, Beautify.K_CARD_CY,
@@ -206,7 +436,7 @@ final class SettingsPanel {
             }
         });
         addAction(host, g5, "聊天条透明度", Storage.num(Beautify.K_CARD_ALPHA, 200) + "/255",
-                new Runnable() {
+                Ui.C_SKIN, new Runnable() {
                     @Override
                     public void run() {
                         choose(host, "聊天条透明度", ALPHA_LABELS,
@@ -221,71 +451,75 @@ final class SettingsPanel {
                                 });
                     }
                 });
-        addAction(host, g5, "圆角半径", Storage.num(Beautify.K_CARD_CORNER, 16) + "dp", new Runnable() {
-            @Override
-            public void run() {
-                choose(host, "圆角半径", RADIUS_LABELS,
-                        indexOf(Storage.num(Beautify.K_CARD_CORNER, 16), RADII), new Pick() {
-                            @Override
-                            public void on(int i) {
-                                Storage.setNum(Beautify.K_CARD_CORNER, RADII[i]);
-                                Storage.setOn(Prefs.K_THEME, true);
-                                toast(host, "圆角 " + RADIUS_LABELS[i] + "（重进界面生效）");
-                            }
-                        });
-            }
-        });
-        addAction(host, g5, "左右内缩", Storage.num(Beautify.K_CARD_INSET, 10) + "dp", new Runnable() {
-            @Override
-            public void run() {
-                final int[] vals = {0, 4, 8, 12, 16, 24};
-                String[] labels = {"0", "4dp", "8dp", "12dp", "16dp", "24dp"};
-                choose(host, "左右内缩", labels,
-                        indexOf(Storage.num(Beautify.K_CARD_INSET, 10), vals), new Pick() {
-                            @Override
-                            public void on(int i) {
-                                Storage.setNum(Beautify.K_CARD_INSET, vals[i]);
-                                Storage.setOn(Prefs.K_THEME, true);
-                                toast(host, "内缩 " + vals[i] + "dp（重进界面生效）");
-                            }
-                        });
-            }
-        });
-        addAction(host, g5, "卡片高度", Storage.num(Beautify.K_CARD_H, 0) + "dp", new Runnable() {
-            @Override
-            public void run() {
-                final int[] vals = {-24, -16, -8, 0, 8, 16, 24, 32};
-                String[] labels = {"-24", "-16", "-8", "0", "8", "16", "24", "32"};
-                choose(host, "卡片高度", labels,
-                        indexOf(Storage.num(Beautify.K_CARD_H, 0), vals), new Pick() {
-                            @Override
-                            public void on(int i) {
-                                Storage.setNum(Beautify.K_CARD_H, vals[i]);
-                                Storage.setOn(Prefs.K_THEME, true);
-                                toast(host, "卡片高度 " + vals[i] + "dp（重进界面生效）");
-                            }
-                        });
-            }
-        });
-        addAction(host, g5, "卡片间隔", Storage.num(Beautify.K_CARD_GAP, 8) + "dp", new Runnable() {
-            @Override
-            public void run() {
-                final int[] vals = {0, 2, 4, 8, 12, 16, 24};
-                String[] labels = {"0", "2dp", "4dp", "8dp", "12dp", "16dp", "24dp"};
-                choose(host, "卡片间隔", labels,
-                        indexOf(Storage.num(Beautify.K_CARD_GAP, 8), vals), new Pick() {
-                            @Override
-                            public void on(int i) {
-                                Storage.setNum(Beautify.K_CARD_GAP, vals[i]);
-                                Storage.setOn(Prefs.K_THEME, true);
-                                toast(host, "卡片间隔 " + vals[i] + "dp（重进界面生效）");
-                            }
-                        });
-            }
-        });
-        addSwitch(host, g5, Beautify.K_CARD_BLUR_ON, "聊天条模糊", "与背景模糊各自独立");
+        addAction(host, g5, "聊天条圆角", Storage.num(Beautify.K_CARD_CORNER, 16) + "dp", Ui.C_SKIN,
+                new Runnable() {
+                    @Override
+                    public void run() {
+                        choose(host, "聊天条圆角", RADIUS_LABELS,
+                                indexOf(Storage.num(Beautify.K_CARD_CORNER, 16), RADII), new Pick() {
+                                    @Override
+                                    public void on(int i) {
+                                        Storage.setNum(Beautify.K_CARD_CORNER, RADII[i]);
+                                        Storage.setOn(Prefs.K_THEME, true);
+                                        toast(host, "聊天条圆角 " + RADIUS_LABELS[i] + "（重进界面生效）");
+                                    }
+                                });
+                    }
+                });
+        addAction(host, g5, "左右内缩", Storage.num(Beautify.K_CARD_INSET, 10) + "dp", Ui.C_SKIN,
+                new Runnable() {
+                    @Override
+                    public void run() {
+                        final int[] vals = {0, 4, 8, 12, 16, 24};
+                        final String[] labels = {"0", "4dp", "8dp", "12dp", "16dp", "24dp"};
+                        choose(host, "左右内缩", labels,
+                                indexOf(Storage.num(Beautify.K_CARD_INSET, 10), vals), new Pick() {
+                                    @Override
+                                    public void on(int i) {
+                                        Storage.setNum(Beautify.K_CARD_INSET, vals[i]);
+                                        Storage.setOn(Prefs.K_THEME, true);
+                                        toast(host, "内缩 " + vals[i] + "dp（重进界面生效）");
+                                    }
+                                });
+                    }
+                });
+        addAction(host, g5, "卡片高度", Storage.num(Beautify.K_CARD_H, 0) + "dp", Ui.C_SKIN,
+                new Runnable() {
+                    @Override
+                    public void run() {
+                        final int[] vals = {-24, -16, -8, 0, 8, 16, 24, 32};
+                        final String[] labels = {"-24", "-16", "-8", "0", "8", "16", "24", "32"};
+                        choose(host, "卡片高度", labels,
+                                indexOf(Storage.num(Beautify.K_CARD_H, 0), vals), new Pick() {
+                                    @Override
+                                    public void on(int i) {
+                                        Storage.setNum(Beautify.K_CARD_H, vals[i]);
+                                        Storage.setOn(Prefs.K_THEME, true);
+                                        toast(host, "卡片高度 " + vals[i] + "dp（重进界面生效）");
+                                    }
+                                });
+                    }
+                });
+        addAction(host, g5, "卡片间隔", Storage.num(Beautify.K_CARD_GAP, 8) + "dp", Ui.C_SKIN,
+                new Runnable() {
+                    @Override
+                    public void run() {
+                        final int[] vals = {0, 2, 4, 8, 12, 16, 24};
+                        final String[] labels = {"0", "2dp", "4dp", "8dp", "12dp", "16dp", "24dp"};
+                        choose(host, "卡片间隔", labels,
+                                indexOf(Storage.num(Beautify.K_CARD_GAP, 8), vals), new Pick() {
+                                    @Override
+                                    public void on(int i) {
+                                        Storage.setNum(Beautify.K_CARD_GAP, vals[i]);
+                                        Storage.setOn(Prefs.K_THEME, true);
+                                        toast(host, "卡片间隔 " + vals[i] + "dp（重进界面生效）");
+                                    }
+                                });
+                    }
+                });
+        addSwitch(host, g5, Beautify.K_CARD_BLUR_ON, "聊天条模糊", "与背景模糊各自独立", Ui.C_SKIN);
         addAction(host, g5, "聊天条模糊强度",
-                "半径 " + Storage.num(Beautify.K_CARD_BLUR_R, 12), new Runnable() {
+                "半径 " + Storage.num(Beautify.K_CARD_BLUR_R, 12), Ui.C_SKIN, new Runnable() {
                     @Override
                     public void run() {
                         final String[] labels = new String[BLURS.length];
@@ -302,36 +536,50 @@ final class SettingsPanel {
                                 });
                     }
                 });
+        root.addView(g5);
 
-        // 背景裁剪放在背景分组里
-        addAction(host, g4, "背景裁剪", cropLabel(Beautify.K_BG_CX, Beautify.K_BG_CY,
-                Beautify.K_BG_CW, Beautify.K_BG_CH), new Runnable() {
-            @Override
-            public void run() {
-                pickCrop(host, Beautify.K_BG_CX, Beautify.K_BG_CY,
-                        Beautify.K_BG_CW, Beautify.K_BG_CH);
-            }
-        });
-        addInfo(host, g4, "作者 " + author(host) + " · 版本 " + version(host));
-
-        root.addView(note(host, "切换即时生效；部分项需重进会话或重启微信。"));
+        // ── 页脚 ──
+        LinearLayout about = Ui.card(host);
+        Ui.section(host, about, "关于", Ui.SUB);
+        Ui.infoRow(host, about, "作者 " + author(host) + " · 版本 " + version(host)
+                + " · 微信 " + WxVersion.label(), Ui.TEXT);
+        Ui.infoRow(host, about, "本模块不收集、不上传任何数据；所有开关只作用于本机。"
+                + "仅供个人学习研究，禁止在国内网络平台传播或售卖。", Ui.SUB);
+        root.addView(about);
+        root.addView(Ui.note(host, "切换即时生效；标了「重进界面」的项需要退出当前页面再进来。"));
 
         d.setContentView(scroll);
-        d.setOnDismissListener(new android.content.DialogInterface.OnDismissListener() {
+        d.setOnDismissListener(new DialogInterface.OnDismissListener() {
             @Override
-            public void onDismiss(android.content.DialogInterface dialog) {
+            public void onDismiss(DialogInterface dialog) {
                 showing = false;
+                current = null;
             }
         });
+        current = d;
+        log("dialog show(), view=" + d.getWindow().getDecorView().getClass().getName());
         d.show();
+        log("dialog shown, isShowing=" + d.isShowing());
     }
 
-    // ── actions ──────────────────────────────────────────────────────────────
+    // ── 行的语法糖（统一走 Ui，配色按分组） ─────────────────────────────────
 
+    private static void addSwitch(Context ctx, LinearLayout card, final String key,
+                                  String label, String desc, int accent) {
+        Ui.switchRow(ctx, card, label, desc, Prefs.on(key, Prefs.def(key)), accent, new Ui.Toggle() {
+            @Override
+            public void on(boolean value) {
+                Prefs.setOn(key, value);
+            }
+        });
+    }
 
+    private static void addAction(Context ctx, LinearLayout card, String label, String value,
+                                  int accent, final Runnable action) {
+        Ui.actionRow(ctx, card, label, value, accent, action);
+    }
 
-
-    // ── appearance parameter tables ──────────────────────────────────────────
+    // ── 参数表 ──────────────────────────────────────────────────────────────
 
     private static final int[] ALPHAS = {255, 220, 180, 128, 90, 50};
     private static final String[] ALPHA_LABELS = {"100%", "86%", "70%", "50%", "35%", "20%"};
@@ -339,11 +587,25 @@ final class SettingsPanel {
     private static final String[] RADIUS_LABELS =
             {"2dp", "4dp", "8dp", "12dp", "16dp", "24dp", "32dp"};
     private static final int[] BLURS = {5, 10, 20, 30, 45, 60};
+    private static final int[] STEP_MODES = {2, 1, 3};
+    private static final String[] STEP_MODE_LABELS =
+            {"自动增加（每小时 +N）", "倍率（按真实步数放大）", "直接指定步数（立刻生效）"};
+
+    private static String stepParamLabel() {
+        switch (Storage.num(Steps.K_MODE, 2)) {
+            case 1:
+                return (Storage.num(Steps.K_MUL, 15) / 10.0) + " 倍";
+            case 3:
+                return Storage.num(Steps.K_TARGET, 12000) + " 步";
+            default:
+                return "每小时 +" + Storage.num(Steps.K_RATE, 200) + " 步";
+        }
+    }
+
     private static final String[] MODE_KEYS = {"fill", "fit", "stretch", "center", "custom"};
     private static final String[] MODE_LABELS =
             {"填充（裁剪多余）", "适应（留边）", "拉伸（变形填满）", "原图居中", "自定义尺寸"};
 
-    /** Parameter picker. */
     private interface Pick {
         void on(int index);
     }
@@ -364,9 +626,9 @@ final class SettingsPanel {
             new android.app.AlertDialog.Builder(host)
                     .setTitle(title)
                     .setSingleChoiceItems(labels, Math.max(0, checked),
-                            new android.content.DialogInterface.OnClickListener() {
+                            new DialogInterface.OnClickListener() {
                                 @Override
-                                public void onClick(android.content.DialogInterface d, int which) {
+                                public void onClick(DialogInterface d, int which) {
                                     pick.on(which);
                                     d.dismiss();
                                 }
@@ -378,12 +640,10 @@ final class SettingsPanel {
         }
     }
 
-    /** Free-form width/height percentages for the custom sizing mode. */
     private static void askCustomSize(final Activity host) {
         try {
-            LinearLayout box = new LinearLayout(host);
-            box.setOrientation(LinearLayout.VERTICAL);
-            int pad = (int) (16 * host.getResources().getDisplayMetrics().density);
+            LinearLayout box = Ui.column(host);
+            int pad = Ui.dp(host, 16);
             box.setPadding(pad, pad, pad, pad);
 
             final android.widget.EditText wIn = numInput(host,
@@ -396,9 +656,9 @@ final class SettingsPanel {
             new android.app.AlertDialog.Builder(host)
                     .setTitle("自定义背景尺寸")
                     .setView(box)
-                    .setPositiveButton("确定", new android.content.DialogInterface.OnClickListener() {
+                    .setPositiveButton("确定", new DialogInterface.OnClickListener() {
                         @Override
-                        public void onClick(android.content.DialogInterface d, int which) {
+                        public void onClick(DialogInterface d, int which) {
                             Storage.setNum(Beautify.K_BG_W, parse(wIn, 100));
                             Storage.setNum(Beautify.K_BG_H, parse(hIn, 100));
                             Storage.setStr(Beautify.K_BG_MODE, "custom");
@@ -459,9 +719,8 @@ final class SettingsPanel {
         return Storage.num(Beautify.K_BG_W, 100) + "% x " + Storage.num(Beautify.K_BG_H, 100) + "%";
     }
 
-    // ── crop helpers ─────────────────────────────────────────────────────────
+    // ── 裁剪 ────────────────────────────────────────────────────────────────
 
-    /** Percentage rectangles. Presets cover the practical "align it like this" cases. */
     private static final String[] CROP_LABELS = {
             "整张图", "居中放大", "上方三分之一", "中间三分之一", "下方三分之一",
             "左半", "右半", "横向居中 60%", "纵向居中 60%"};
@@ -506,97 +765,26 @@ final class SettingsPanel {
         }
     }
 
-    private static String labelFor(String key) {
-        try {
-            String p = Prefs.str(key, "");
-            if (p == null || p.isEmpty()) return "未设置（点击选择图片）";
-            int i = p.lastIndexOf('/');
-            return "已设置：" + (i >= 0 ? p.substring(i + 1) : p);
-        } catch (Throwable ignored) {
-            return "未设置（点击选择图片）";
-        }
-    }
-
-    private static String shortPath(String p) {
-        int i = p.lastIndexOf('/');
-        return i >= 0 && i < p.length() - 1 ? p.substring(i + 1) : p;
-    }
-
-    /** Preset palette - a full colour picker is overkill for a bar tint. */
-    private static final String[] COLOUR_NAMES = {
-            "跟随微信默认", "纯黑 #000000", "深空灰 #2C2C2E", "墨绿 #1F3B2C",
-            "藏蓝 #14243D", "酒红 #3B1F26", "米白 #F2EFE9", "淡紫 #2A2233",
-    };
-    private static final int[] COLOUR_VALUES = {
-            0, 0xFF000000, 0xFF2C2C2E, 0xFF1F3B2C,
-            0xFF14243D, 0xFF3B1F26, 0xFFF2EFE9, 0xFF2A2233,
-    };
-
-    private static void pickColour(final Activity host) {
-        final int current = Prefs.num(Theme.K_BAR_TINT, 0);
-        int checked = 0;
-        for (int i = 0; i < COLOUR_VALUES.length; i++) {
-            if (COLOUR_VALUES[i] == current) { checked = i; break; }
-        }
-        try {
-            new android.app.AlertDialog.Builder(host)
-                    .setTitle("标题栏 / 状态栏配色")
-                    .setSingleChoiceItems(COLOUR_NAMES, checked,
-                            new android.content.DialogInterface.OnClickListener() {
-                                @Override
-                                public void onClick(android.content.DialogInterface d, int which) {
-                                    Prefs.setNum(Theme.K_BAR_TINT, COLOUR_VALUES[which]);
-                                    Prefs.setOn(Prefs.K_THEME, true);
-                                    toast(host, "已设置：" + COLOUR_NAMES[which]
-                                            + "（重进主界面生效）");
-                                    d.dismiss();
-                                }
-                            })
-                    .setNegativeButton("取消", null)
-                    .show();
-        } catch (Throwable ignored) {
-            // 忽略
-        }
-    }
-
-    private static String barColourLabel() {
-        int c = Prefs.num(Theme.K_BAR_TINT, 0);
-        for (int i = 0; i < COLOUR_VALUES.length; i++) {
-            if (COLOUR_VALUES[i] == c) return COLOUR_NAMES[i];
-        }
-        return "跟随微信默认";
-    }
-
-    private static String packLabel() {
-        try {
-            ThemePack.ensureLoaded();
-            String n = ThemePack.name();
-            return (n == null || "(none)".equals(n)) ? "未找到主题包（点此重载）" : n;
-        } catch (Throwable ignored) {
-            return "未找到主题包";
-        }
-    }
-
-
-    /** 署名，取自资源（跟 strings.xml 走）。 */
+    /** 面板在宿主进程里，拿不到模块自己的资源，署名直接写常量（与 strings.xml 一致）。 */
     private static String author(Context ctx) {
-        try {
-            return ctx.getString(R.string.app_author);
-        } catch (Throwable t) {
-            return "lex";
-        }
+        return "lex";
     }
 
-    /** 面板里显示的版本号。 */
+    /** 面板在微信进程里跑，ctx.getPackageName() 是微信 —— 要显式问模块自己那一版。 */
     private static String version(Context ctx) {
         try {
-            return ctx.getPackageManager().getPackageInfo(ctx.getPackageName(), 0).versionName;
+            return ctx.getPackageManager()
+                    .getPackageInfo("io.github.lex0m.lexin", 0).versionName;
         } catch (Throwable t) {
-            return "1.0";
+            return MODULE_VERSION;
         }
     }
 
-    private static void toast(Context ctx, String s) {        try {
+    /** 取不到包信息时的兜底（与 AndroidManifest 的 versionName 保持一致）。 */
+    private static final String MODULE_VERSION = "1.1";
+
+    private static void toast(Context ctx, String s) {
+        try {
             Toast.makeText(ctx, s, Toast.LENGTH_LONG).show();
         } catch (Throwable ignored) {
             // 忽略
@@ -609,179 +797,5 @@ final class SettingsPanel {
         } catch (Throwable ignored) {
             // 忽略
         }
-    }
-
-    // ── view vocabulary (resource-free) ──────────────────────────────────────
-
-    private static View header(final Context ctx, final Dialog d, String text) {
-        LinearLayout row = new LinearLayout(ctx);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(ctx, 4), 0, 0, dp(ctx, 8));
-
-        TextView tv = new TextView(ctx);
-        tv.setText(text);
-        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 21f);
-        tv.setTextColor(Color.parseColor("#1C1C1E"));
-        tv.setLayoutParams(new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        row.addView(tv);
-
-        TextView close = new TextView(ctx);
-        close.setText("\u2715");
-        close.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f);
-        close.setTextColor(Color.parseColor("#8A8A8E"));
-        close.setPadding(dp(ctx, 12), dp(ctx, 12), dp(ctx, 12), dp(ctx, 12));
-        close.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                try {
-                    d.dismiss();
-                } catch (Throwable ignored) {
-                    showing = false;
-                }
-            }
-        });
-        row.addView(close);
-        return row;
-    }
-
-    private static TextView note(Context ctx, String text) {
-        TextView tv = new TextView(ctx);
-        tv.setText(text);
-        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
-        tv.setTextColor(Color.parseColor("#8A8A8E"));
-        tv.setPadding(dp(ctx, 4), dp(ctx, 4), dp(ctx, 4), dp(ctx, 10));
-        return tv;
-    }
-
-    private static LinearLayout card(Context ctx, LinearLayout parent) {
-        LinearLayout c = new LinearLayout(ctx);
-        c.setOrientation(LinearLayout.VERTICAL);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.WHITE);
-        bg.setCornerRadius(dp(ctx, 12));
-        c.setBackground(bg);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.bottomMargin = dp(ctx, 14);
-        parent.addView(c, lp);
-        return c;
-    }
-
-    private static void addSwitch(Context ctx, LinearLayout card, final String key,
-                                  String label, String desc) {
-        LinearLayout row = new LinearLayout(ctx);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(ctx, 14), dp(ctx, 12), dp(ctx, 14), dp(ctx, 12));
-
-        LinearLayout texts = new LinearLayout(ctx);
-        texts.setOrientation(LinearLayout.VERTICAL);
-        texts.setLayoutParams(new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-        TextView t = new TextView(ctx);
-        t.setText(label);
-        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f);
-        t.setTextColor(Color.parseColor("#1C1C1E"));
-        texts.addView(t);
-
-        TextView d = new TextView(ctx);
-        d.setText(desc);
-        d.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f);
-        d.setTextColor(Color.parseColor("#8A8A8E"));
-        texts.addView(d);
-
-        final Switch sw = new Switch(ctx);
-        sw.setChecked(Prefs.on(key, false));
-        sw.setOnCheckedChangeListener(new android.widget.CompoundButton.OnCheckedChangeListener() {
-            @Override
-            public void onCheckedChanged(android.widget.CompoundButton b, boolean on) {
-                try {
-                    Prefs.setOn(key, on);
-                } catch (Throwable ignored) {
-                    // 忽略
-                }
-            }
-        });
-
-        row.addView(texts);
-        row.addView(sw);
-        card.addView(row);
-        divider(ctx, card);
-    }
-
-    private static void addAction(Context ctx, LinearLayout card, String label,
-                                  String value, final Runnable action) {
-        LinearLayout row = new LinearLayout(ctx);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(ctx, 14), dp(ctx, 12), dp(ctx, 14), dp(ctx, 12));
-
-        LinearLayout texts = new LinearLayout(ctx);
-        texts.setOrientation(LinearLayout.VERTICAL);
-        texts.setLayoutParams(new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-        TextView t = new TextView(ctx);
-        t.setText(label);
-        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f);
-        t.setTextColor(Color.parseColor("#1C1C1E"));
-        texts.addView(t);
-
-        TextView d = new TextView(ctx);
-        d.setText(value);
-        d.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f);
-        d.setTextColor(Color.parseColor("#8A8A8E"));
-        texts.addView(d);
-
-        TextView arrow = new TextView(ctx);
-        arrow.setText("\u203A");
-        arrow.setTextSize(18f);
-        arrow.setTextColor(Color.parseColor("#C7C7CC"));
-
-        row.addView(texts);
-        row.addView(arrow);
-        row.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                action.run();
-            }
-        });
-        card.addView(row);
-        divider(ctx, card);
-    }
-
-    private static void addInfo(Context ctx, LinearLayout card, String text) {
-        TextView tv = new TextView(ctx);
-        tv.setText(text);
-        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f);
-        tv.setTextColor(Color.parseColor("#8A8A8E"));
-        tv.setPadding(dp(ctx, 14), dp(ctx, 2), dp(ctx, 14), dp(ctx, 12));
-        card.addView(tv);
-    }
-
-    private static void divider(Context ctx, LinearLayout card) {
-        View v = new View(ctx);
-        v.setBackgroundColor(Color.parseColor("#EFEFF4"));
-        v.setLayoutParams(new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, Math.max(1, dp(ctx, 1) / 2)));
-        card.addView(v);
-    }
-
-    private static int statusBarPx(Context ctx) {
-        try {
-            int id = ctx.getResources().getIdentifier("status_bar_height", "dimen", "android");
-            if (id > 0) return ctx.getResources().getDimensionPixelSize(id);
-        } catch (Throwable ignored) {
-            // 继续往下
-        }
-        return (int) (24 * ctx.getResources().getDisplayMetrics().density);
-    }
-
-    private static int dp(Context ctx, float v) {
-        return (int) (v * ctx.getResources().getDisplayMetrics().density + 0.5f);
     }
 }

@@ -4,6 +4,7 @@
 # LSPosed 读 assets/xposed_init 里的类名，加载后调它的 hook
 -keep class io.github.lex0m.lexin.Entry { *; }
 # Activity、Provider 由框架按名字实例化
+-keep class io.github.lex0m.lexin.EntryPointActivity { *; }
 -keep class io.github.lex0m.lexin.SettingsActivity { *; }
 -keep class io.github.lex0m.lexin.ThemeActivity { *; }
 -keep class io.github.lex0m.lexin.BgProvider { *; }

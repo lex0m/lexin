@@ -1,85 +1,124 @@
 package io.github.lex0m.lexin;
 
+import android.app.Activity;
 import android.view.View;
-import android.widget.Button;
-
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
+import android.view.ViewGroup;
+import android.widget.TextView;
 
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedBridge;
 
-/** 本地媒体增强（自动查看原图）：在相册决定是否给「查看原图」入口的地方改判断。 */
+/**
+ * 自动查看原图。
+ *
+ * v1.0 挂的是图片浏览页里两个混淆方法名（y9 / M9），微信 8.0.78 上这两个名字已经没了，
+ * 功能实际是哑的。现在改成**按界面文字找按钮并点它** ——
+ * 「查看原图」这四个字微信不太会改，类名改了也不影响。
+ */
 final class MediaSaver {
 
-    static void install() throws Throwable {
-        Class<?> gallery = Silent.cls(Features.loader,
-                "com.tencent.mm.ui.chatting.gallery.ImageGalleryUI");
+    private static final String T = "svc-media: ";
+    private static final String[] LABELS = {"查看原图", "查看原视频", "原图"};
+
+    private static volatile String galleryName;
+
+    /** 同一张图最多重试几次（按钮是异步出现的）。 */
+    private static final int ATTEMPTS = 4;
+    private static final long RETRY_MS = 450L;
+
+    static void install() {
+        Class<?> gallery = Anchors.cls(Anchors.GALLERY);
         if (gallery == null) {
-            Log.d("svc-media: gallery class missing");
+            Status.set("自动查看原图", false);
             return;
         }
-        int n = 0;
-        n += autoClickAfter(gallery, "y9");
-        n += autoClickAfter(gallery, "M9");
-        Log.d("svc-media: armed=" + n);
+        galleryName = gallery.getName();
+        try {
+            XposedBridge.hookAllMethods(Activity.class, "onResume", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    try {
+                        Object act = param.thisObject;
+                        if (!(act instanceof Activity)) return;
+                        if (!galleryName.equals(act.getClass().getName())) return;
+                        if (!Prefs.onDefault(Prefs.K_MEDIA)) return;
+                        schedule((Activity) act);
+                    } catch (Throwable ignored) {
+                        // 仅外观，不打扰浏览页
+                    }
+                }
+            });
+            Status.set("自动查看原图", true);
+            Log.d(T + "armed on " + galleryName);
+        } catch (Throwable t) {
+            Status.set("自动查看原图", false);
+        }
     }
 
-    private static int autoClickAfter(Class<?> owner, String name) {
-        int hits = 0;
-        try {
-            for (Method m : owner.getDeclaredMethods()) {
-                if (!name.equals(m.getName()) || m.getParameterCount() != 0) continue;
-                try {
-                    m.setAccessible(true);
-                    XposedBridge.hookMethod(m, new XC_MethodHook() {
-                        @Override
-                        protected void afterHookedMethod(MethodHookParam p) {
-                            pressOriginal(p.thisObject);
+    private static void schedule(final Activity act) {
+        final View root = act.getWindow() == null ? null : act.getWindow().getDecorView();
+        if (root == null) return;
+        final boolean[] done = {false};
+        for (int i = 0; i < ATTEMPTS; i++) {
+            root.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        if (done[0]) return;                 // 已经切到原图，别再重复点
+                        if (clickOriginal(root)) {
+                            done[0] = true;
+                            Log.d(T + "original pressed");
                         }
-                    });
-                    hits++;
-                } catch (Throwable ignored) {
-                    // 下一个重载
+                    } catch (Throwable ignored) {
+                        // 忽略
+                    }
                 }
-            }
-        } catch (Throwable ignored) {
-            // 不存在就跳过
+            }, RETRY_MS * i);
         }
-        return hits;
     }
 
-    /** Walks the owner's Button fields and presses the one offering the original. */
-    private static void pressOriginal(Object owner) {
-        if (owner == null) return;
+    /** 深度优先找「可点的、带原图字样」的可见控件并点下去。 */
+    private static boolean clickOriginal(View v) {
+        if (v == null) return false;
         try {
-            Class<?> c = owner.getClass();
-            while (c != null && c != Object.class) {
-                for (Field f : c.getDeclaredFields()) {
-                    if (!Button.class.isAssignableFrom(f.getType())) continue;
-                    f.setAccessible(true);
-                    Object v = f.get(owner);
-                    if (!(v instanceof Button)) continue;
-                    Button b = (Button) v;
-                    if (!b.isShown() || !b.isEnabled()) continue;
-                    if (!looksLikeOriginal(b.getText())) continue;
-                    b.performClick();
+            if (v instanceof TextView && v.isShown() && v.isEnabled()) {
+                CharSequence t = ((TextView) v).getText();
+                if (t != null && matches(t.toString())) {
+                    View clickable = clickableSelfOrParent(v);
+                    if (clickable != null) {
+                        clickable.performClick();
+                        return true;
+                    }
                 }
-                c = c.getSuperclass();
+            }
+            if (v instanceof ViewGroup) {
+                ViewGroup g = (ViewGroup) v;
+                for (int i = 0; i < g.getChildCount(); i++) {
+                    if (clickOriginal(g.getChildAt(i))) return true;
+                }
             }
         } catch (Throwable ignored) {
-            // 仅外观 - never disturb the gallery
+            // 继续找
         }
+        return false;
     }
 
-    /** The host's own label for "show me the original". */
-    private static boolean looksLikeOriginal(CharSequence text) {
-        if (text == null) return false;
-        String s = text.toString();
-        return s.contains("查看原图") || s.contains("原图") || s.contains("原视频");
+    private static boolean matches(String s) {
+        for (String l : LABELS) {
+            if (s.contains(l)) return true;
+        }
+        return false;
     }
 
-    static View unused() {
+    private static View clickableSelfOrParent(View v) {
+        View cur = v;
+        for (int i = 0; i < 4 && cur != null; i++) {
+            if (cur.isClickable()) return cur;
+            Object parent = cur.getParent();
+            cur = parent instanceof View ? (View) parent : null;
+        }
         return null;
     }
+
+    private MediaSaver() {}
 }

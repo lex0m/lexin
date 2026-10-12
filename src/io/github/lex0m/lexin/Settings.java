@@ -22,9 +22,12 @@ final class Settings {
     private static final String T = "svc-ui: ";
     /** Bland label: reads as one more system row. */
     private static final String ENTRY_LABEL = "\u901a\u7528";
-    /** Host page that carries the hidden trigger. */
-    private static final String CARE_MODE_CLASS =
-            "com.tencent.mm.plugin.setting.ui.setting.SettingsCareModeIntro";
+    /** Host page that carries the hidden trigger（优先锚点表，取不到就用最后一个验证过的名字）。 */
+    private static String careModeClass() {
+        Class<?> c = Anchors.cls(Anchors.CARE_MODE);
+        return c != null ? c.getName()
+                : "com.tencent.mm.plugin.setting.ui.setting.SettingsCareModeIntro";
+    }
     /** Label of the button that answers the long press. */
     private static final String TRIGGER_TEXT = "\u5f00\u542f";
     private static final AtomicBoolean dumped = new AtomicBoolean(false);
@@ -63,6 +66,52 @@ final class Settings {
 
     static void install() throws Throwable {
         hookCareMode();
+        hookEntryIntent();
+        Status.set("隐蔽入口", true);
+        Status.note("隐蔽入口", "长按「开启」· LSPosed ▶ · 桌面图标");
+    }
+
+    /**
+     * 外部启动跳板（EntryPointActivity）会给微信的 LauncherUI 带一个 extra，
+     * 这里接住它，在微信进程里把面板打开 —— 面板必须跑在微信进程，这是唯一的路子。
+     */
+    private static void hookEntryIntent() {
+        XC_MethodHook hook = new XC_MethodHook() {
+            @Override
+            protected void afterHookedMethod(MethodHookParam p) {
+                try {
+                    Object act = p.thisObject;
+                    if (!(act instanceof Activity)) return;
+                    final Activity a = (Activity) act;
+                    // onNewIntent 时 a.getIntent() 还是旧的那个，新 intent 在参数里
+                    Intent it = null;
+                    if (p.args != null && p.args.length > 0 && p.args[0] instanceof Intent) {
+                        it = (Intent) p.args[0];
+                    } else {
+                        it = a.getIntent();
+                    }
+                    if (it == null) return;
+                    long stamp = it.getLongExtra(EntryPointActivity.EXTRA, -1L);
+                    if (stamp <= 0) return;
+                    it.removeExtra(EntryPointActivity.EXTRA);   // 旋转/重建不再触发第二次
+                    a.getWindow().getDecorView().postDelayed(new Runnable() {
+                        @Override
+                        public void run() {
+                            SettingsPanel.show(a);
+                        }
+                    }, 900L);
+                    bark("entry intent caught");
+                } catch (Throwable ignored) {
+                    // 不打扰宿主
+                }
+            }
+        };
+        try {
+            XposedBridge.hookAllMethods(Activity.class, "onCreate", hook);
+            XposedBridge.hookAllMethods(Activity.class, "onNewIntent", hook);
+        } catch (Throwable ignored) {
+            // 没有就不挂
+        }
     }
 
     /** 隐藏触发方式：长按关怀模式页的主按钮（比插一行设置项更不显眼）。 */
@@ -74,7 +123,7 @@ final class Settings {
                     try {
                         Object act = p.thisObject;
                         if (!(act instanceof Activity)) return;
-                        if (!CARE_MODE_CLASS.equals(act.getClass().getName())) return;
+                        if (!careModeClass().equals(act.getClass().getName())) return;
 
                         final Activity host = (Activity) act;
                         final View decor = host.getWindow().getDecorView();
