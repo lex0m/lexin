@@ -263,17 +263,7 @@ final class SettingsPanel {
                                 }
                             });
                 } else if (mode == 3) {
-                    final int[] vals = {6000, 8000, 10000, 12000, 15000, 20000, 30000};
-                    final String[] labels = {"6000", "8000", "10000", "12000", "15000", "20000", "30000"};
-                    choose(host, "今日目标步数", labels,
-                            indexOf(Storage.num(Steps.K_TARGET, 12000), vals), new Pick() {
-                                @Override
-                                public void on(int i) {
-                                    Storage.setNum(Steps.K_TARGET, vals[i]);
-                                    Storage.setOn(Steps.K_ON, true);
-                                    toast(host, "今日目标 " + labels[i] + " 步（重进微信生效）");
-                                }
-                            });
+                    askStepBonus(host);
                 } else {
                     final int[] vals = {100, 200, 300, 500, 800, 1200};
                     final String[] labels = {"100", "200", "300", "500", "800", "1200"};
@@ -306,8 +296,8 @@ final class SettingsPanel {
                     }
                 });
         Ui.infoRow(host, g6, "步数在传感器层改写，微信不碰；"
-                + "倍率按真实步数放大，自动增加/指定目标随一天时间平滑增长，"
-                + "超过上限就停在上限，避免数字离谱。", Ui.SUB);
+                + "倍率按真实步数放大，自动增加按小时往上抬，直接增加是把 N 步一次性加上去"
+                + "（加完就撒手，真实步数照常累加，不会把数字钉死）；都受上限约束。", Ui.SUB);
         root.addView(g6);
 
         // ── 外观 ──
@@ -589,14 +579,16 @@ final class SettingsPanel {
     private static final int[] BLURS = {5, 10, 20, 30, 45, 60};
     private static final int[] STEP_MODES = {2, 1, 3};
     private static final String[] STEP_MODE_LABELS =
-            {"自动增加（每小时 +N）", "倍率（按真实步数放大）", "直接指定步数（立刻生效）"};
+            {"自动增加（每小时 +N）", "倍率（按真实步数放大）", "直接增加（加 N 步，之后照常涨）"};
 
     private static String stepParamLabel() {
         switch (Storage.num(Steps.K_MODE, 2)) {
             case 1:
                 return (Storage.num(Steps.K_MUL, 15) / 10.0) + " 倍";
-            case 3:
-                return Storage.num(Steps.K_TARGET, 12000) + " 步";
+            case 3: {
+                int v = Storage.num(Steps.K_TARGET, 0);
+                return v > 0 ? (v + " 步") : "未设置（不加）";
+            }
             default:
                 return "每小时 +" + Storage.num(Steps.K_RATE, 200) + " 步";
         }
@@ -633,6 +625,65 @@ final class SettingsPanel {
                                     d.dismiss();
                                 }
                             })
+                    .setNegativeButton("取消", null)
+                    .show();
+        } catch (Throwable ignored) {
+            toast(host, "设置失败");
+        }
+    }
+
+    /**
+     * 直接增加的步数：不给档位，自己填。只做范围判断，上限就是「额外步数上限」那个值
+     * （一开始配好的那个上限，别让填进去的数反过来超了它）。
+     */
+    private static void askStepBonus(final Activity host) {
+        try {
+            final int cap = Math.max(1000, Storage.num(Steps.K_CAP, 20000));
+            final int cur = Storage.num(Steps.K_TARGET, 0);
+
+            LinearLayout box = Ui.column(host);
+            int pad = Ui.dp(host, 16);
+            box.setPadding(pad, pad, pad, pad);
+            // 不预填、不给默认值：留空就是"不加"，填多少加多少
+            final android.widget.EditText in = numInput(host, cur, "留空 = 不增加；1 ~ " + cap + "（受「额外步数上限」约束）");
+            in.setText(cur > 0 ? String.valueOf(cur) : "");
+            box.addView(in);
+
+            new android.app.AlertDialog.Builder(host)
+                    .setTitle("直接增加的步数")
+                    .setView(box)
+                    .setPositiveButton("确定", new DialogInterface.OnClickListener() {
+                        @Override
+                        public void onClick(DialogInterface d, int which) {
+                            String raw = in.getText() == null ? "" : in.getText().toString().trim();
+                            if (raw.isEmpty()) {                    // 留空 = 不加，别塞默认值
+                                Storage.setNum(Steps.K_TARGET, 0);
+                                Storage.setOn(Steps.K_ON, true);
+                                toast(host, "已清空：不放任何额外步数（重进微信生效）");
+                                return;
+                            }
+                            int v;
+                            try {
+                                v = Integer.parseInt(raw.replaceAll("[^0-9]", ""));
+                            } catch (Throwable bad) {
+                                toast(host, "只能填数字");
+                                return;
+                            }
+                            if (v < 1) {
+                                toast(host, "至少 1 步");
+                                return;
+                            }
+                            if (v > cap) {
+                                v = cap;
+                                toast(host, "最多 " + cap + " 步（额外步数上限）—— 已按上限收紧，"
+                                        + "要更大先去改「额外步数上限」");
+                            } else {
+                                toast(host, "直接加 " + v + " 步（重进微信生效）");
+                            }
+                            Storage.setNum(Steps.K_TARGET, v);
+                            Storage.setOn(Steps.K_ON, true);
+                        }
+                    })
                     .setNegativeButton("取消", null)
                     .show();
         } catch (Throwable ignored) {

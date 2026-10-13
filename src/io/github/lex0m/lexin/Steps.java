@@ -207,7 +207,7 @@ final class Steps {
      * 微信层的换算：这里拿到的**就是微信自己算出来的今天步数**，所以三种模式都能给准值。
      *   1 倍率      ：今天 × k
      *   2 自动增加  ：今天 + 每小时 N 步 × 已过小时数
-     *   3 直接指定  ：直接给目标值
+     *   3 直接增加  ：真实步数 + N（一次性加的 N，之后照常增长）
      */
     private static double fromToday(double realToday) {
         int mode = Storage.num(K_MODE, 2);
@@ -216,11 +216,16 @@ final class Steps {
         switch (mode) {
             case 1: {
                 double k = Math.max(10, Storage.num(K_MUL, DEFAULT_MUL10)) / 10.0;
-                out = realToday * k;
+                out = realToday + Math.min(cap, realToday * (k - 1.0));
                 break;
             }
             case 3: {
-                out = Math.max(100, Storage.num(K_TARGET, DEFAULT_TARGET));
+                // 直接增加：真实步数 + N。**不能返回常量** —— 返回常量会把今日结果锁死，
+                // 之后用户真走路也不再涨（这就是上一版被反馈"锁定"的原因）。
+                // 没填（0）就原样返回，不替用户决定加多少。
+                int bonus = Storage.num(K_TARGET, 0);
+                if (bonus <= 0) return realToday;
+                out = realToday + Math.min(cap, bonus);
                 break;
             }
             default: {
@@ -229,7 +234,8 @@ final class Steps {
                 break;
             }
         }
-        if (out > cap) out = cap;
+        // 注意：这里**不要**再把总量夹到 cap。上限只约束"额外加的那部分"（各分支里已经夹过），
+        // 否则真实步数一大，总量就被压在 cap 上不动了 —— 又变成"锁定"。
         return out;
     }
 
@@ -253,7 +259,7 @@ final class Steps {
      * 三种模式的语义（用户要求分开）：
      *   1 自动增加：随时间平滑涨（每小时 +N），像真在走路
      *   2 倍率    ：按真实步数放大
-     *   3 指定步数：**直接**把今天改到指定值（不是按时间填充），立刻生效
+     *   3 直接增加：把自定义步数一次性加上去，立刻生效；之后真实步数照常累加（不锁定）
      *
      * 为什么能"直接改"：微信自己算的是「今天的累计 - 今天第一次读到的累计」，
      * 我们只要让 fake 的"今日增量"等于目标值就行 —— 记下今天第一次读到的原始累计当基准，
@@ -270,11 +276,14 @@ final class Steps {
                     added = raw * (k - 1.0);
                     break;
                 }
-                case 3: {   // 直接指定今日步数：把"还差多少"一次性注入（只增不减）
-                    int target = Math.max(100, Storage.num(K_TARGET, DEFAULT_TARGET));
-                    double realToday = Math.max(0, raw - baseOf(raw));
-                    double need = target - realToday;
-                    if (need > injected) injected = Math.min(cap, need);
+                case 3: {   // 直接增加：一次性把 N 步加上去，之后完全不再参与
+                    int bonus = Storage.num(K_TARGET, 0);         // 没填就是 0：一点都不加
+                    baseOf(raw);                                  // 顺带处理跨天/计数器重启
+                    if (bonus <= 0) { injected = 0; injectedOnce = false; added = 0; break; }
+                    if (!injectedOnce) {                          // 只注入一次
+                        injected = Math.min(cap, bonus);
+                        injectedOnce = true;
+                    }
                     added = injected;
                     break;
                 }
@@ -313,8 +322,10 @@ final class Steps {
         }
     }
 
-    /** 已经注入的总量（模式 3）。 */
+    /** 已经注入的总量（模式 3：一次性加的步数）。 */
     private static volatile double injected = 0;
+    /** 模式 3 今天是否已经加过（加过就不再动，避免把增长钉死）。 */
+    private static volatile boolean injectedOnce = false;
     /** 今天的基准累计值（第一次读到的那个）。 */
     private static volatile double baseRaw = -1;
     private static volatile int baseDay = -1;
@@ -323,8 +334,9 @@ final class Steps {
         int day = (int) (System.currentTimeMillis() / 86400000L);
         if (day != baseDay || baseRaw < 0 || raw < baseRaw) {
             baseDay = day;
-            baseRaw = raw;      // 新的一天 / 传感器重启 → 重新开始注入
+            baseRaw = raw;      // 新的一天 / 传感器重启 → 重置
             injected = 0;
+            injectedOnce = false;
         }
         return baseRaw;
     }
@@ -367,8 +379,10 @@ final class Steps {
         switch (Storage.num(K_MODE, 2)) {
             case 1:
                 return "倍率 " + (Storage.num(K_MUL, DEFAULT_MUL10) / 10.0) + "×";
-            case 3:
-                return "今日目标 " + Storage.num(K_TARGET, DEFAULT_TARGET) + " 步";
+            case 3: {
+                int v = Storage.num(K_TARGET, 0);
+                return v > 0 ? ("直接加 " + v + " 步") : "直接增加（未填步数）";
+            }
             default:
                 return "每小时 +" + Storage.num(K_RATE, DEFAULT_RATE) + " 步";
         }
