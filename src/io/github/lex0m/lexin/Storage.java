@@ -46,6 +46,8 @@ final class Storage {
     static final String K_BG = "bg_chat";
     static final String K_BG_HOME = "bg_home";
     static final String K_SCAN = "scan_free";
+    /** 诊断日志开关（默认关：发布版一个字都不写）。 */
+    static final String K_DIAG = "diag_log";
 
     // ── init ─────────────────────────────────────────────────────────────────
 
@@ -205,6 +207,21 @@ final class Storage {
         } catch (Throwable ignored) {
             // 忽略
         }
+    }
+
+    /** 诊断日志是否开启（持久化，供下次加载时判断）。 */
+    static boolean diag() {
+        try {
+            String k = physical(K_DIAG);
+            if (sp != null && sp.contains(k)) return sp.getBoolean(k, false);
+            if (xsp != null) {
+                xsp.reload();
+                if (xsp.contains(k)) return xsp.getBoolean(k, false);
+            }
+        } catch (Throwable ignored) {
+            // 读不到就按关处理
+        }
+        return false;
     }
 
     /** 诊断：当前在哪一侧、用的是哪个文件。 */

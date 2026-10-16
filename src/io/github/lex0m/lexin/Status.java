@@ -34,6 +34,17 @@ final class Status {
     }
 
     /** 面板用：功能 -> "已生效 / 未适配（当前微信版本）"。 */
+    /** 一行摘要：适配 9/9（给"加载埋点"和面板共用）。 */
+    static String summary() {
+        int ok = 0;
+        int total = 0;
+        for (Map.Entry<String, Boolean> e : all().entrySet()) {
+            total++;
+            if (e.getValue()) ok++;
+        }
+        return "适配 " + ok + "/" + total;
+    }
+
     static Map<String, Boolean> all() {
         return new LinkedHashMap<>(ok);
     }

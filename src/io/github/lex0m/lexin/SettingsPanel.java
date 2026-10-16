@@ -195,6 +195,21 @@ final class SettingsPanel {
                         toast(host, "已开始重新适配，稍后重启微信生效");
                     }
                 });
+        // 现场排查用：资源走哪条路 + 锚点表版本 + 诊断日志开关（日志默认关，发布版一个字不写）
+        Ui.actionRow(host, st, "诊断信息",
+                diagLabel() + "（点一下切换诊断日志）", Ui.OK, new Runnable() {
+                    @Override
+                    public void run() {
+                        boolean on = !Log.runtimeOn();
+                        Log.setRuntime(on);
+                        Storage.setOn(Storage.K_DIAG, on);      // 持久化：重启微信后仍记得
+                        toast(host, on
+                                ? "诊断日志已打开：复现一次问题，然后把 LSPosed 的日志导出"
+                                : "诊断日志已关闭");
+                        close();
+                        show(host);
+                    }
+                });
         root.addView(st);
 
         // ── 功能分组 ──
@@ -577,6 +592,24 @@ final class SettingsPanel {
     private static final String[] RADIUS_LABELS =
             {"2dp", "4dp", "8dp", "12dp", "16dp", "24dp", "32dp"};
     private static final int[] BLURS = {5, 10, 20, 30, 45, 60};
+    /** 资源路径 + 锚点表版本数 —— 现场排查第一眼要看的东西。 */
+    private static String diagLabel() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("资源 ").append(Assets.source());
+        java.util.Set<String> vs = Anchors.knownVersions();
+        sb.append(" · 锚点表 ");
+        if (vs == null || vs.isEmpty()) {
+            sb.append("未读到");
+        } else {
+            java.util.List<String> list = new java.util.ArrayList<>(vs);
+            java.util.Collections.sort(list);
+            sb.append(list.size()).append(" 个版本（").append(list.get(0)).append("~")
+                    .append(list.get(list.size() - 1)).append("）");
+        }
+        sb.append(" · 日志 ").append(Log.runtimeOn() ? "开（重启微信后生效）" : "关");
+        return sb.toString();
+    }
+
     private static final int[] STEP_MODES = {2, 1, 3};
     private static final String[] STEP_MODE_LABELS =
             {"自动增加（每小时 +N）", "倍率（按真实步数放大）", "直接增加（加 N 步，之后照常涨）"};

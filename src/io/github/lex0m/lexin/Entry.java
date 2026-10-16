@@ -25,6 +25,29 @@ public final class Entry implements IXposedHookLoadPackage, IXposedHookZygoteIni
         }
     }
 
+    /**
+     * 每个宿主进程**只写一行**"我还活着"。
+     *
+     * **默认不写**（发布版零日志）；只有在面板里打开过「诊断日志」之后，重启微信才会写这一行。
+     * 有了它就能分清"框架没加载模块"和"加载了但没生效"：
+     *   有这行 → 模块进了这个进程（问题在功能层，看后面的适配数）
+     *   没这行 → 框架层面就没加载（去查作用域/重启/框架版本，跟模块无关）
+     * 只放版本号 + 系统版本 + 适配数，不含任何内部结构。
+     */
+    private static final java.util.concurrent.atomic.AtomicBoolean SAID =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
+
+    static void alive(String where) {
+        if (!Log.runtimeOn()) return;       // 默认关：不写日志就不写，一个字都不留
+        if (!SAID.compareAndSet(false, true)) return;
+        try {
+            XposedBridge.log("lexin v" + Features.MODULE_VERSION + " alive in " + where
+                    + " (Android " + android.os.Build.VERSION.SDK_INT + ") · " + Status.summary());
+        } catch (Throwable ignored) {
+            // 日志永不抛异常
+        }
+    }
+
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
         if (!HOST.equals(lp.packageName)) return;
@@ -38,6 +61,7 @@ public final class Entry implements IXposedHookLoadPackage, IXposedHookZygoteIni
                             } catch (Throwable ignored) {
                                 // 静默
                             }
+                            alive(android.app.Application.getProcessName());
                         }
                     });
         } catch (Throwable ignored) {

@@ -11,6 +11,9 @@ import android.content.Context;
  */
 final class Features {
 
+    /** 模块版本（埋点与面板共用，别再从宿主包里查）。 */
+    static final String MODULE_VERSION = "1.1";
+
     static Context app;
     static ClassLoader loader;
     static int hostVersionCode;
@@ -36,6 +39,7 @@ final class Features {
         // 配置存在宿主自己的 SharedPreferences，由同样跑在宿主进程里的面板写入：全程无 IPC，
         // 这是刻意的——Android 15 上所有跨进程通道都实测被封（模块私有文件 SELinux、媒体卷 FUSE、ContentProvider）
         Prefs.init(app);
+        Log.setRuntime(Storage.diag());     // 默认 false：发布版不写日志
 
         // 锚点表 + 撤回记录需要先就位，后面的功能才有类可挂
         Anchors.init();
