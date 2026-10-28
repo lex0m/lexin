@@ -107,6 +107,9 @@ final class Beautify {
 
     private static final Map<View, Boolean> cornered =
             Collections.synchronizedMap(new WeakHashMap<View, Boolean>());
+    /** 已圆角化过的 decor 根：圆角化只在首次 layout 做一次，滑动时不断给新列表项 setClipToOutline 就是拖影主源。 */
+    private static final Map<View, Boolean> corneredRoots =
+            Collections.synchronizedMap(new WeakHashMap<View, Boolean>());
 
     /** 已清过内部底板的行。清理幂等但不免费（要逐个看子视图），滚动路径上要跳过已处理的。 */
     private static final Map<View, Boolean> fillsStripped =
@@ -143,6 +146,8 @@ final class Beautify {
 
     /** 全局节流：把同一波重绘请求合并成一次 */
     private static long lastPaint = 0L;
+    /** 卡片化滚动节流：滚动时每帧 applyCards 全列表重设背景 = 拖影/卡顿，350ms 才做一次 */
+    private static long lastCard = 0L;
 
     /** 整页 dump 的帧数上限 */
     private static final int MAX_PAGE_DUMPS = 20;
@@ -165,6 +170,8 @@ final class Beautify {
     private static int bandColour = 0;
     /** 当前应用到窗口的状态栏条高度，避免重复设置 */
     private static int bandH = -1;
+    /** 当前应用到窗口的底部导航栏高度，避免重复设置 */
+    private static int navH = -1;
     /** 已经装过背景的窗口（Window#getBackground 是隐藏 API，只能自己记） */
     private static WeakReference<android.view.Window> bgWin = null;
 
@@ -310,8 +317,9 @@ final class Beautify {
         if (sw <= 0 || sh <= 0) return;
 
         // 合并突发重绘：页面可见性、切页滚动、fragment resume、自愈会在同一瞬间都要重画，一次重画就是全树遍历加重设背景，连着跑就是频闪。
+        // 节流从 450ms 提到 800ms：切页不再每个 fragment resume 都整屏重画，卡顿与频闪一起压。
         long nowMs = System.currentTimeMillis();
-        if (nowMs - lastPaint < 450L) return;
+        if (nowMs - lastPaint < 800L) return;
         lastPaint = nowMs;
 
         // 打开的会话完全不碰：微信允许用户自定义聊天背景，盖我们的图就是「把我聊天背景顶掉」；会话里也不需要卡片化。
@@ -334,11 +342,31 @@ final class Beautify {
                 if (decor.getContext() instanceof Activity) {
                     android.view.Window w = ((Activity) decor.getContext()).getWindow();
                     if (w != null && !bgPlainLight) {
+                        // 按微信当前主题取正确色（深色模式 #191919 / 浅色 #EDEDED），
+                        // 硬编码浅色会把深色模式的状态栏变浅、标题栏还黑 → 大黑边。
+                        int col = windowColour(decor, w);
                         w.setBackgroundDrawable(
-                                new android.graphics.drawable.ColorDrawable(0xFFEDEDED));
+                                new android.graphics.drawable.ColorDrawable(col));
                         bgPlainLight = true;
                     }
                 }
+            } catch (Throwable ignored) {
+                // 仅外观
+            }
+            // ★ 会话页标题栏强制浅色：fixChatBar 之前写好了却没被调用（黑顶栏的根因）。
+            //   等布局落定后再遍历找标题栏改成白色，避免和微信自己的深浅选择赛跑。
+            try {
+                final View d = decor;
+                d.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            fixChatBar(d, 0);
+                        } catch (Throwable ignored) {
+                            // 仅外观
+                        }
+                    }
+                });
             } catch (Throwable ignored) {
                 // 仅外观
             }
@@ -358,11 +386,13 @@ final class Beautify {
                 if (win != null) {
                     if (bandColour == 0) bandColour = windowColour(decor, win);
                     int band = statusBarHeight(decor);
+                    int nav = navigationBarHeight(decor);
                     // 只在真的变化时才重设窗口背景：每次给一个新 drawable 等于整屏重绘，而这段会在滚动／布局／切页时跑，看起来就是壁纸在闪。
-                    if (bgWin == null || bgWin.get() != win || band != bandH) {
+                    if (bgWin == null || bgWin.get() != win || band != bandH || nav != navH) {
                         bandH = band;
+                        navH = nav;
                         bgWin = new WeakReference<android.view.Window>(win);
-                        win.setBackgroundDrawable(new TopBandDrawable(imgBg, band, bandColour));
+                        win.setBackgroundDrawable(new TopBandDrawable(imgBg, band, nav, bandColour));
                     }
                 }
             }
@@ -581,6 +611,31 @@ final class Beautify {
     }
 
     /** 解码并准备壁纸层。模糊用「大比例降采样再放大」实现，屏幕尺寸下与逐像素处理没差别，且不占每帧开销。 */
+    /**
+     * 设置页（模块 App）里选的背景图落在模块自己的私有目录，宿主进程读不到。
+     * 这里通过 BgProvider 拉一份到宿主目录（一次性），之后照旧走缓存逻辑。
+     */
+    private static boolean pullBackground(File dst) {
+        try {
+            android.content.Context ctx = Features.app;
+            if (ctx == null) return false;
+            java.io.InputStream in = ctx.getContentResolver().openInputStream(BgProvider.uri());
+            if (in == null) return false;
+            java.io.FileOutputStream os = new java.io.FileOutputStream(dst, false);
+            try {
+                byte[] buf = new byte[16384];
+                int n;
+                while ((n = in.read(buf)) > 0) os.write(buf, 0, n);
+            } finally {
+                try { in.close(); } catch (Throwable ignored) { }
+                try { os.close(); } catch (Throwable ignored) { }
+            }
+            return dst.length() > 0;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     private static boolean ensureImage(File dir, int w, int h) {
         String mode = Storage.str(K_BG_MODE, "fill");
         boolean blurOn = Storage.on(K_BLUR_ON, false);
@@ -594,7 +649,9 @@ final class Beautify {
 
         try {
             File f = new File(dir, BG_FILE);
-            if (!f.exists() || f.length() <= 0) return false;
+            if (!f.exists() || f.length() <= 0) {
+                if (!pullBackground(f)) return false;
+            }
 
             BitmapFactory.Options opts = new BitmapFactory.Options();
             if (blurOn && radius > 1) opts.inSampleSize = Math.max(2, radius);
@@ -692,7 +749,7 @@ final class Beautify {
                     int band = statusBarHeight(v) - loc[1];
                     if (band > 0) {
                         if (bandColour == 0) bandColour = windowColour(v, null);
-                        setBackgroundSafely(v, new TopBandDrawable(part, band, bandColour));
+                        setBackgroundSafely(v, new TopBandDrawable(part, band, 0, bandColour));
                     } else {
                         // 一律用我们自己的类，绝不用 BitmapDrawable：微信自己的层也用它，「是不是我画的」就分不清（这条规则已被违反过两次）。
                         setBackgroundSafely(v, new BarDrawable(part));
@@ -909,39 +966,65 @@ final class Beautify {
 
     /** 在微信设置标题栏背景的那一刻替换：事后清理会与微信重绘赛跑，赛跑就是频闪 */
     private static int hookActionBar() {
+        Class<?> c = Silent.cls(Features.loader, S.CLS_ABAR);
+        if (c == null) return 0;
         int hits = 0;
-        try {
-            Class<?> c = Silent.cls(Features.loader,
-                    S.CLS_ABAR);
-            if (c == null) return 0;
-            XposedBridge.hookAllMethods(c, "setPrimaryBackground", new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam p) {
-                    try {
-                        if (OUR_CALL.get() != null) return;
-                        if (p.args.length < 1) return;
-                        // 只对主窗口：把会话页标题栏清透明会露出它后面的深色窗口（「聊天里顶部一条黑灰边」）。
-                        if (!(p.thisObject instanceof View)) return;
-                        View bar = (View) p.thisObject;
-                        // 这个版本里会话页与主界面共用 LauncherUI 的窗口，按 Activity 名分不出来，只能按视图层级。
-                        if (insideChatting(bar)) {
-                            // 微信按标题栏背后的颜色挑聊天标题栏深浅，而且在会话打开时就定了——事后还原窗口背景已经晚了（它已经选了 #111111）。
-                            p.args[0] = new android.graphics.drawable.ColorDrawable(0xFFFFFFFF);
-                            return;
+        // ★ 根因（诊断 dump 实证）：聊天标题栏 = androidx.appcompat.widget.ActionBarContainer，
+        //   背景被微信设成 ColorDrawable(0xff111111)（深黑灰）。而微信设这个背景走的不是
+        //   setPrimaryBackground，是 setBackground / setBackgroundColor —— 之前只 hook
+        //   setPrimaryBackground，所以一直没拦住。
+        //   这里统一拦 setBackground / setBackgroundColor / setPrimaryBackground 三个入口。
+        XC_MethodHook interceptor = new XC_MethodHook() {
+            @Override
+            protected void beforeHookedMethod(MethodHookParam p) {
+                try {
+                    if (OUR_CALL.get() != null) return;      // 我们自己设的，不拦（防递归）
+                    if (!(p.thisObject instanceof View)) return;
+                    View bar = (View) p.thisObject;
+                    if (insideChatting(bar)) {
+                        // 聊天页：把任何背景（含深色 0xff111111）改成半透明白圆角（灵动岛）
+                        if (p.args.length >= 1) {
+                            if (p.args[0] instanceof Integer) {
+                                p.args[0] = Integer.valueOf(0xF0FFFFFF);   // setBackgroundColor(int)
+                            } else {
+                                p.args[0] = makeChatBarDrawable(bar);       // setBackground/setPrimaryBackground(Drawable)
+                            }
                         }
-                        if (!isMainContext(bar.getContext())) return;
-                        // 用透明而不是 null：调用方可能假定 drawable 存在
-                        p.args[0] = new android.graphics.drawable.ColorDrawable(0);
-                    } catch (Throwable ignored) {
-                        // 不打扰宿主
+                        return;
                     }
+                    if (!isMainContext(bar.getContext())) return;
+                    // 主页：透明（v1.3.4 用户满意的状态）
+                    if (p.args.length >= 1) {
+                        if (p.args[0] instanceof Integer) {
+                            p.args[0] = Integer.valueOf(0);
+                        } else {
+                            p.args[0] = new android.graphics.drawable.ColorDrawable(0);
+                        }
+                    }
+                } catch (Throwable ignored) {
+                    // 不打扰宿主
                 }
-            });
-            hits++;
-        } catch (Throwable ignored) {
-            // 这个版本没有
+            }
+        };
+        for (String m : new String[]{"setBackground", "setBackgroundColor", "setPrimaryBackground"}) {
+            try {
+                XposedBridge.hookAllMethods(c, m, interceptor);
+                hits++;
+            } catch (Throwable ignored) {
+                // 这个方法没有
+            }
         }
         return hits;
+    }
+
+    /** 聊天标题栏的半透明白圆角背景（只返回 drawable，不碰 margin/elevation/outline）。 */
+    private static Drawable makeChatBarDrawable(View bar) {
+        float density = bar.getResources().getDisplayMetrics().density;
+        android.graphics.drawable.GradientDrawable gd =
+                new android.graphics.drawable.GradientDrawable();
+        gd.setColor(0xF0FFFFFF);
+        gd.setCornerRadius(28 * density);
+        return gd;
     }
 
     // ── veto ──────────────────────────────────────────────────────────────────
@@ -967,8 +1050,9 @@ final class Beautify {
                             View decor = ((Activity) act).getWindow() == null ? null
                                     : ((Activity) act).getWindow().getDecorView();
                             if (decor == null) return;
-                            // 新页面：视图都是新的，清掉「已画过」的记录再画一遍。
-                            painted.clear();
+                            // 不整体清 painted：它是 WeakHashMap（View 弱引用），旧视图 GC 后自动失效，
+                            // 新视图不在缓存里自然会画；微信复用视图改了背景由 stillOurs 兜底。
+                            // 整体 clear 会让每次切页都全树重画一遍 —— 卡顿和壁纸频闪的主要来源。
                             decor.post(new Runnable() {
                                 @Override
                                 public void run() {
@@ -1333,12 +1417,32 @@ final class Beautify {
                         if (((Integer) p.args[0]) == View.VISIBLE
                                 && nameOf(v).contains(S.CHAT_UI)) {
                             final View root = v.getRootView();
+                            // ★ 立即同步还原窗口背景（不等 250ms）：微信在聊天容器变可见后马上读背景选标题栏深浅，
+                            //   拖到 postDelayed 时它已经选了 #111111。同步还原，它读到浅色就选浅色标题栏。
+                            try {
+                                if (root != null && root.getContext() instanceof Activity) {
+                                    android.view.Window w = ((Activity) root.getContext()).getWindow();
+                                    if (w != null) {
+                                        // 按微信当前主题（深色/浅色）取正确窗口色，别硬编码浅色：
+                                        // 深色模式下硬编码 #EDEDED 会把状态栏变浅、标题栏还黑 → 大黑边。
+                                        int col = windowColour(root, w);
+                                        w.setBackgroundDrawable(
+                                                new android.graphics.drawable.ColorDrawable(col));
+                                        bgPlainLight = true;
+                                    }
+                                }
+                            } catch (Throwable ignored) {
+                                // 仅外观
+                            }
                             v.postDelayed(new Runnable() {
                                 @Override
                                 public void run() {
                                     try {
-                                        // 这里只还原窗口背景，不动标题栏颜色——与它抢颜色会造成断续频闪。
-                                        if (root != null && root.getWidth() > 0) paint(root);
+                                        // 兜底：把标题栏改成浅色，并重画窗口（还原窗口背景后补一枪）。
+                                        if (root != null && root.getWidth() > 0) {
+                                            fixChatBar(root, 0);
+                                            paint(root);
+                                        }
                                     } catch (Throwable ignored) {
                                         // 仅外观
                                     }
@@ -1466,18 +1570,76 @@ final class Beautify {
         return false;
     }
 
-    /** 把会话页标题栏改成浅色：这个页面没有 setBackground 可拦（颜色来自布局膨胀），也不触发重绘，只能直接找到它改 */
+    /** 顶部深色横条（聊天标题栏黑边的形状特征）：宽≥90%屏幕、高36~160dp、位于屏幕顶部（状态栏之下）。 */
+    private static boolean isDarkTopBar(View v) {
+        try {
+            int w = v.getWidth(), h = v.getHeight();
+            if (w <= 0 || h <= 0) return false;
+            int sw = v.getResources().getDisplayMetrics().widthPixels;
+            if (w < sw * 0.9f) return false;
+            if (h < dp(v, 36) || h > dp(v, 160)) return false;
+            int[] loc = new int[2];
+            v.getLocationOnScreen(loc);
+            if (loc[1] < dp(v, 30) || loc[1] > dp(v, 220)) return false;   // 跳过状态栏、只认标题栏带
+            Drawable d = v.getBackground();
+            if (d == null) return false;
+            // ColorDrawable：深色才算黑边，浅色放行（避免把浅色顶栏误伤）
+            if (d instanceof android.graphics.drawable.ColorDrawable) {
+                int c = ((android.graphics.drawable.ColorDrawable) d).getColor();
+                int r = (c >> 16) & 0xFF, g2 = (c >> 8) & 0xFF, b = c & 0xFF;
+                if (((c >>> 24) & 0xFF) > 200 && (r + g2 + b) / 3 < 80) return true;
+                return false;
+            }
+            // 非 ColorDrawable（GradientDrawable/BitmapDrawable 等微信自绘）：顶部横条 + 有背景 → 认
+            return true;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    /**
+     * 聊天标题栏「灵动岛」化：**只换背景**（半透明白 + 圆角），绝不碰 margin / elevation / outline。
+     *
+     * ★ 血泪教训：聊天与主页共用同一个 ActionBarContainer（同一窗口的 ActionBar），
+     *   给它设 margin/elevation/clipToOutline 会残留到主页 —— 上一版就是这样把好好的主页顶栏搞坏的。
+     *   背景色每次 setPrimaryBackground 都按 insideChatting 动态重设，来回切也不会留痕。
+     */
+    private static void applyChatBarStyle(View bar) {
+        try {
+            Drawable cur = bar.getBackground();
+            // 已经是灵动岛样式就不再重设（滚动时 fixChatBar 会频繁喊）
+            if (cur instanceof android.graphics.drawable.GradientDrawable) return;
+            float density = bar.getResources().getDisplayMetrics().density;
+            android.graphics.drawable.GradientDrawable gd =
+                    new android.graphics.drawable.GradientDrawable();
+            gd.setColor(0xF0FFFFFF);
+            gd.setCornerRadius(28 * density);
+            // OUR_CALL 保护：setBackground 现在也被 hook，不保护会递归
+            OUR_CALL.set(Boolean.TRUE);
+            try {
+                bar.setBackground(gd);
+            } finally {
+                OUR_CALL.remove();
+            }
+        } catch (Throwable ignored) {
+            // 仅外观
+        }
+    }
+
+    /** 把会话页标题栏改成「灵动岛」圆角胶囊（跟主页底栏同一条路）：之前设白色/透明都压不住黑边。 */
+    private static volatile long lastTopDump = 0L;
+
     private static void fixChatBar(View v, int depth) {
         if (v == null || depth > 24) return;
         try {
-            if (v.isShown() && isBarLike(v) && insideChatting(v)) {
-                Drawable d = v.getBackground();
-                boolean alreadyLight = d instanceof android.graphics.drawable.ColorDrawable
-                        && ((android.graphics.drawable.ColorDrawable) d).getColor() == 0xFFFFFFFF;
-                if (!alreadyLight) {
-                    setBackgroundSafely(v,
-                            new android.graphics.drawable.ColorDrawable(0xFFFFFFFF));
-                }
+            if (v.isShown() && insideChatting(v) && (isBarLike(v) || isDarkTopBar(v))) {
+                applyChatBarStyle(v);
+            }
+            // ★ 诊断：只在真正聊天页（chatOnScreen 精确判断）+ 5 秒节流时 dump 一次顶部 View
+            if (depth == 0 && chatOnScreen(v)
+                    && System.currentTimeMillis() - lastTopDump > 5000L) {
+                lastTopDump = System.currentTimeMillis();
+                dumpTopBars(v, 0);
             }
             if (v instanceof ViewGroup) {
                 ViewGroup g = (ViewGroup) v;
@@ -1487,6 +1649,48 @@ final class Beautify {
             }
         } catch (Throwable ignored) {
             // 仅外观
+        }
+    }
+
+    /** 诊断：dump 聊天页顶部（y<500dp）所有可见 View 的类名/尺寸/背景/坐标/文本。 */
+    private static void dumpTopBars(View v, int depth) {
+        if (v == null || depth > 16) return;
+        try {
+            if (v.isShown() && v.getHeight() > 0) {
+                int[] loc = new int[2];
+                v.getLocationOnScreen(loc);
+                if (loc[1] < dp(v, 500)) {
+                    Drawable bg = v.getBackground();
+                    StringBuilder sb = new StringBuilder();
+                    sb.append("TOPBAR ").append(nameOf(v))
+                            .append(" ").append(v.getWidth()).append("x").append(v.getHeight())
+                            .append(" at=").append(loc[0]).append(",").append(loc[1])
+                            .append(" bg=").append(bg == null ? "null" : nameOf(bg));
+                    if (bg instanceof android.graphics.drawable.ColorDrawable) {
+                        sb.append("(0x").append(Integer.toHexString(
+                                ((android.graphics.drawable.ColorDrawable) bg).getColor())).append(")");
+                    }
+                    if (bg instanceof android.graphics.drawable.GradientDrawable) {
+                        android.content.res.ColorStateList csl =
+                                ((android.graphics.drawable.GradientDrawable) bg).getColor();
+                        sb.append(csl == null ? "(gd=multi)" : "(gd=0x"
+                                + Integer.toHexString(csl.getDefaultColor()) + ")");
+                    }
+                    if (v instanceof android.widget.TextView) {
+                        CharSequence cs = ((android.widget.TextView) v).getText();
+                        if (cs != null && cs.length() > 0) sb.append(" text=").append(cs);
+                    }
+                    Log.d(T + sb.toString());
+                }
+            }
+            if (v instanceof ViewGroup) {
+                ViewGroup g = (ViewGroup) v;
+                for (int i = 0; i < g.getChildCount(); i++) {
+                    dumpTopBars(g.getChildAt(i), depth + 1);
+                }
+            }
+        } catch (Throwable ignored) {
+            // 仅诊断
         }
     }
 
@@ -1950,11 +2154,32 @@ final class Beautify {
                             ViewGroup g = (ViewGroup) self;
                             if (!isGenericList(g)) return;
                             // 会话页标题栏在这里定不了色：颜色来自微信布局膨胀，且每次滚动都会重设——与它抢就是拉锯，拉锯就是频闪。会话页保持原样。
+                            // ★ 但滚动会重设标题栏深色背景：滚动时也把标题栏压回透明（跟主页一致），透明是稳定值、非抢色，不拉锯。
+                            if (insideChatting(self)) {
+                                final View chatRoot = self.getRootView();
+                                if (chatRoot != null) {
+                                    self.postDelayed(new Runnable() {
+                                        @Override
+                                        public void run() {
+                                            try {
+                                                fixChatBar(chatRoot, 0);
+                                            } catch (Throwable ignored) {
+                                                // 仅外观
+                                            }
+                                        }
+                                    }, 80L);
+                                }
+                            }
                             dumpListOnce(g);
                             View pageRoot = g.getRootView();
                             if (pageRoot != null) dumpPageOnce(pageRoot);
                             blankPullDownBar(g, 0);
-                            applyCards(g);
+                            // ★ 卡片化节流：onScrollChanged 每帧都来，applyCards 全列表重设背景 = 滑动拖影/卡顿主源之一。
+                            long cardNow = System.currentTimeMillis();
+                            if (cardNow - lastCard >= 350L) {
+                                lastCard = cardNow;
+                                applyCards(g);
+                            }
                         } catch (Throwable ignored) {
                             // 不打扰宿主
                         }
@@ -2007,15 +2232,17 @@ final class Beautify {
     private static final class TopBandDrawable extends Drawable {
         private final Bitmap bmp;
         private final int band;
+        private final int bottomBand;
         private final int colour;
         private final Paint picPaint =
                 new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
         private final Paint bandPaint = new Paint();
         private final Rect rect = new Rect();
 
-        TopBandDrawable(Bitmap bmp, int band, int colour) {
+        TopBandDrawable(Bitmap bmp, int band, int bottomBand, int colour) {
             this.bmp = bmp;
             this.band = Math.max(0, band);
+            this.bottomBand = Math.max(0, bottomBand);
             this.colour = colour;
         }
 
@@ -2023,12 +2250,18 @@ final class Beautify {
         public void draw(Canvas c) {
             try {
                 rect.set(getBounds());
+                // 顶部状态栏条 + 底部导航栏（小白条）条都画纯色：系统栏是透明的，
+                // 壁纸画到那里会跟着重绘一起闪（小白条区域频闪的根因）。
                 if (band > 0) {
                     bandPaint.setColor(colour);
                     c.drawRect(rect.left, rect.top, rect.right, rect.top + band, bandPaint);
                 }
+                if (bottomBand > 0) {
+                    bandPaint.setColor(colour);
+                    c.drawRect(rect.left, rect.bottom - bottomBand, rect.right, rect.bottom, bandPaint);
+                }
                 c.save();
-                c.clipRect(rect.left, rect.top + band, rect.right, rect.bottom);
+                c.clipRect(rect.left, rect.top + band, rect.right, rect.bottom - bottomBand);
                 c.drawBitmap(bmp, null, rect, picPaint);
                 c.restore();
             } catch (Throwable ignored) {
@@ -2082,6 +2315,32 @@ final class Beautify {
         } catch (Throwable ignored) {
             return 0;
         }
+    }
+
+    /** 底部导航栏（手势小白条）高度（px）：Android 11+ 优先窗口 insets，取不到退回 dimen。 */
+    private static int navigationBarHeight(View v) {
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 30) {
+                android.view.WindowInsets wi = v.getRootWindowInsets();
+                if (wi != null) {
+                    int bottom = wi.getInsets(android.view.WindowInsets.Type.navigationBars()).bottom;
+                    if (bottom > 0) return bottom;
+                }
+            }
+        } catch (Throwable ignored) {
+            // 继续往下
+        }
+        try {
+            android.content.res.Resources res = v.getContext().getResources();
+            int id = res.getIdentifier("navigation_bar_height", "dimen", "android");
+            if (id > 0) {
+                int px = res.getDimensionPixelSize(id);
+                if (px > 0) return px;
+            }
+        } catch (Throwable ignored) {
+            // 继续往下
+        }
+        return 0;
     }
 
     /** 状态栏条要还原成的颜色：取替换前的窗口色；微信窗口通常透明，那种情况用主题默认色 */
@@ -2172,7 +2431,7 @@ final class Beautify {
                             last = now;
                             try {
                                 // 自愈：以「承载壁纸的窗口层」为准。以页容器为准永远为真（它们按设计就是透明的），照那种判据会一直重画
-                                if (now - lastHeal > 1500L && rootNeedsWallpaper(decor)) {
+                                if (now - lastHeal > 3000L && rootNeedsWallpaper(decor)) {
                                     lastHeal = now;
                                     decor.post(new Runnable() {
                                         @Override
@@ -2187,6 +2446,9 @@ final class Beautify {
                                 }
                                 if (!Storage.on(K_CORNER_ON, false)) return;
                                 int radius = clamp(Storage.num(K_CORNER_DP, 12), 1, 40);
+                                // ★ 圆角化只在 decor 首次 layout 做一次。之前每次 onGlobalLayout（220ms 节流）都全树遍历
+                                //    clipCorners，滑动时新列表项不断被 setClipToOutline（离屏渲染）= 频闪 + 拖影。
+                                if (corneredRoots.put(decor, Boolean.TRUE) != null) return;
                                 decor.post(new Runnable() {
                                     @Override
                                     public void run() {

@@ -17,6 +17,26 @@
    ],
    "simple": "^[a-z0-9]{1,4}$"
   },
+  "add_contact_label": {
+   "ctor": "<init>(java.lang.String):void",
+   "note": "新建标签 netscene（构造器收标签名）",
+   "pkg": "",
+   "scan": false,
+   "simple": "^.+$",
+   "strings": [
+    "/cgi-bin/micromsg-bin/addcontactlabel"
+   ]
+  },
+  "api_manager": {
+   "note": "聊天组件管理器（getApi 按接口拿组件）",
+   "pkg": "com.tencent.mm.ui.chatting.manager",
+   "scan": false,
+   "simple": "^.+$",
+   "strings": [
+    "[get] ",
+    " is not a interface!"
+   ]
+  },
   "care_mode": {
    "exact": "com.tencent.mm.plugin.setting.ui.setting.SettingsCareModeIntro",
    "scan": false
@@ -29,6 +49,17 @@
    ],
    "simple": "^[a-z0-9]{1,3}$"
   },
+  "chat_bind_mvvm": {
+   "emitMethod": "[onBindView]",
+   "note": "消息 View 绑定点（识别新进语音消息）",
+   "pkg": "",
+   "scan": false,
+   "simple": "^.+$",
+   "strings": [
+    "MicroMsg.MvvmChattingItem",
+    "[onBindView]"
+   ]
+  },
   "chat_binder": {
    "method": "h(*,*,int,int,boolean,java.util.List):void",
    "note": "同签名的绑定器很多，只认版本表/种子，不自动扫",
@@ -38,6 +69,70 @@
     "xl5.g"
    ],
    "simple": "^[a-z0-9]{1,4}$"
+  },
+  "chat_footer": {
+   "exact": "com.tencent.mm.pluginsdk.ui.chat.ChatFooter",
+   "note": "聊天底部输入栏（悬浮卡片化：圆角/阴影/侧边距）",
+   "scan": false
+  },
+  "chat_menu": {
+   "allHits": true,
+   "maxHits": 40,
+   "method": "onCreateMMMenu(*):void",
+   "multi": true,
+   "note": "长按菜单构造点（按未混淆方法名定位）",
+   "pkg": "com.tencent.mm.ui.chatting",
+   "scan": true,
+   "simple": "^.+$"
+  },
+  "chat_menu_select": {
+   "allHits": true,
+   "maxHits": 40,
+   "method": "onMMMenuItemSelected(android.view.MenuItem,int):void",
+   "multi": true,
+   "note": "菜单点击回调（按未混淆方法名定位）",
+   "pkg": "com.tencent.mm.ui.chatting",
+   "scan": true,
+   "simple": "^.+$"
+  },
+  "chat_quick_select": {
+   "note": "多选组件（解除多选上限用）",
+   "pkg": "",
+   "scan": false,
+   "simple": "^.+$",
+   "strings": [
+    "MicroMsg.ChatItemQuickSelectComponent"
+   ]
+  },
+  "chatting_adapter_v3": {
+   "note": "聊天数据适配器（getItem 取消息）",
+   "pkg": "",
+   "scan": false,
+   "simple": "^.+$",
+   "strings": [
+    "MicroMsg.ChattingDataAdapterV3",
+    "[handleMsgChange] isLockNotify:"
+   ]
+  },
+  "chatting_context": {
+   "note": "聊天上下文（取 apiManager 拿组件实例）",
+   "pkg": "",
+   "scan": false,
+   "simple": "^.+$",
+   "strings": [
+    "MicroMsg.ChattingContext",
+    "[notifyDataSetChange]"
+   ]
+  },
+  "core_storage": {
+   "note": "核心存储（拿进程内已打开的微信数据库）",
+   "pkg": "",
+   "scan": false,
+   "simple": "^.+$",
+   "strings": [
+    "MMKernel.CoreStorage",
+    "CheckData path[%s] blocksize:%s blockcount:%s availcount:%s"
+   ]
   },
   "emoji_panel": {
    "method": "a(android.view.View,android.content.Context,int,*):void",
@@ -52,11 +147,42 @@
    "exact": "com.tencent.mm.ui.chatting.gallery.ImageGalleryUI",
    "scan": false
   },
+  "mm_kernel": {
+   "note": "MMKernel（拿 netSceneQueue / coreStorage）",
+   "pkg": "",
+   "scan": false,
+   "simple": "^.+$",
+   "strings": [
+    "MicroMsg.MMKernel",
+    "Kernel not null, has initialized."
+   ]
+  },
+  "modify_contact_label": {
+   "ctor": "<init>(java.util.LinkedList):void",
+   "note": "批量改标签 netscene（构造器收联系人标签列表）",
+   "pkg": "",
+   "scan": false,
+   "simple": "^.+$",
+   "strings": [
+    "/cgi-bin/micromsg-bin/modifycontactlabellist"
+   ]
+  },
   "msg": {
    "fields": "field_msgSvrId,field_talker,field_isSend",
    "pkg": "com.tencent.mm.storage",
    "scan": true,
    "simple": "^[a-z0-9]{1,4}$"
+  },
+  "net_scene_queue": {
+   "note": "网络请求队列（addNetSceneToQueue 发 netscene；方法在运行时按签名定位）",
+   "pkg": "",
+   "scan": false,
+   "simple": "^.+$",
+   "strings": [
+    "MicroMsg.NetSceneQueue",
+    "forbid in waiting: type=",
+    "forbid in running: type="
+   ]
   },
   "qr_scan": {
    "note": "WeKit 同款：改 QBarString 的 source/a8KeyScene，把相册/长按图片当相机处理",
@@ -128,39 +254,148 @@
     "content://com.miui.providers.steps/item"
    ]
   },
+  "sqlite_db_wrapper": {
+   "note": "SQLite 包装（拿 WCDB SQLiteDatabase 实例）",
+   "pkg": "",
+   "scan": false,
+   "simple": "^.+$",
+   "strings": [
+    "MicroMsg.SqliteDB",
+    "sql is null "
+   ]
+  },
   "sysmsg_parser": {
    "method": "d(java.lang.String,java.lang.String,java.lang.String):java.util.Map",
    "note": "8.0.70-8.0.79 均为 platformtools 下的短名类",
    "pkg": "com.tencent.mm.sdk.platformtools",
    "scan": true,
    "simple": "^[a-z0-9]{1,4}$"
+  },
+  "transform_component": {
+   "note": "转文字组件：收到语音自动调它转文字",
+   "pkg": "com.tencent.mm.ui.chatting.component",
+   "scan": false,
+   "simple": "^.+$",
+   "strings": [
+    "MicroMsg.TransformComponent",
+    "[onChattingPause]"
+   ]
   }
  },
  "versions": {
   "8.0.72": {
    "code": 3100,
    "slots": {
+    "add_contact_label": "q73.a",
+    "api_manager": "com.tencent.mm.ui.chatting.manager.c",
     "care_mode": "com.tencent.mm.plugin.setting.ui.setting.SettingsCareModeIntro",
     "chat_adapter": "com.tencent.mm.ui.chatting.adapter.k",
+    "chat_bind_mvvm": "nb5.g#h",
+    "chat_footer": "com.tencent.mm.pluginsdk.ui.chat.ChatFooter",
+    "chat_menu": [
+     "com.tencent.mm.ui.chatting.component.in",
+     "com.tencent.mm.ui.chatting.gallery.ImageGalleryUI",
+     "com.tencent.mm.ui.chatting.gallery.aa",
+     "com.tencent.mm.ui.chatting.gallery.b3",
+     "com.tencent.mm.ui.chatting.gallery.z0",
+     "com.tencent.mm.ui.chatting.viewitems.ChattingItemDyeingTemplate$$g",
+     "com.tencent.mm.ui.chatting.viewitems.rp",
+     "com.tencent.mm.ui.chatting.viewitems.sa"
+    ],
+    "chat_menu_select": [
+     "com.tencent.mm.ui.chatting.cd",
+     "com.tencent.mm.ui.chatting.component.n",
+     "com.tencent.mm.ui.chatting.component.u2",
+     "com.tencent.mm.ui.chatting.component.y1",
+     "com.tencent.mm.ui.chatting.gallery.ImageGalleryUI",
+     "com.tencent.mm.ui.chatting.j0",
+     "com.tencent.mm.ui.chatting.presenter.x",
+     "com.tencent.mm.ui.chatting.presenter.z1",
+     "com.tencent.mm.ui.chatting.view.g1",
+     "com.tencent.mm.ui.chatting.viewitems.ChattingItemDyeingTemplate$$f",
+     "com.tencent.mm.ui.chatting.viewitems.ChattingItemDyeingTemplate$3",
+     "com.tencent.mm.ui.chatting.viewitems.dq",
+     "com.tencent.mm.ui.chatting.viewitems.rq",
+     "com.tencent.mm.ui.chatting.viewitems.x",
+     "com.tencent.mm.ui.chatting.xc"
+    ],
+    "chat_quick_select": "com.tencent.mm.ui.chatting.component.a1",
+    "chatting_adapter_v3": "com.tencent.mm.ui.chatting.adapter.k",
+    "chatting_context": "ja5.d",
+    "core_storage": "dl0.c0",
     "emoji_panel": "br.k0",
     "gallery": "com.tencent.mm.ui.chatting.gallery.ImageGalleryUI",
+    "mm_kernel": "dl0.k1",
+    "modify_contact_label": "q73.e",
     "msg": "com.tencent.mm.storage.f9",
+    "net_scene_queue": "com.tencent.mm.modelbase.r1",
     "qr_scan": "ry3.p",
     "sns_ad": "com.tencent.mm.plugin.sns.storage.ADInfo",
-    "sport_detector": "com.tencent.mm.plugin.sport.model.h",
+    "sport_detector": "com.tencent.mm.plugin.sport.model.g",
     "sport_push_detector": "com.tencent.mm.plugin.sport.model.m",
     "sport_util": "com.tencent.mm.plugin.sport.model.c0",
-    "sysmsg_parser": "com.tencent.mm.sdk.platformtools.aa"
+    "sqlite_db_wrapper": "q75.a0",
+    "sysmsg_parser": "com.tencent.mm.sdk.platformtools.aa",
+    "transform_component": "com.tencent.mm.ui.chatting.component.km"
    }
   },
   "8.0.74": {
    "code": 3120,
    "slots": {
+    "add_contact_label": "e93.a",
+    "api_manager": "com.tencent.mm.ui.chatting.manager.c",
     "care_mode": "com.tencent.mm.plugin.setting.ui.setting.SettingsCareModeIntro",
     "chat_adapter": "com.tencent.mm.ui.chatting.adapter.k",
+    "chat_bind_mvvm": "od5.g#h",
+    "chat_footer": "com.tencent.mm.pluginsdk.ui.chat.ChatFooter",
+    "chat_menu": [
+     "com.tencent.mm.ui.chatting.component.f3",
+     "com.tencent.mm.ui.chatting.component.pe",
+     "com.tencent.mm.ui.chatting.gallery.ImageGalleryUI",
+     "com.tencent.mm.ui.chatting.viewitems.ChattingItemDyeingTemplate",
+     "com.tencent.mm.ui.chatting.viewitems.vj",
+     "com.tencent.mm.ui.chatting.viewitems.zj",
+     "com.tencent.mm.ui.chatting.x4"
+    ],
+    "chat_menu_select": [
+     "com.tencent.mm.ui.chatting.ChattingUI",
+     "com.tencent.mm.ui.chatting.TextPreviewUI$$b",
+     "com.tencent.mm.ui.chatting.component.b9",
+     "com.tencent.mm.ui.chatting.component.d9",
+     "com.tencent.mm.ui.chatting.component.gh",
+     "com.tencent.mm.ui.chatting.component.j",
+     "com.tencent.mm.ui.chatting.component.pe",
+     "com.tencent.mm.ui.chatting.component.zc",
+     "com.tencent.mm.ui.chatting.gallery.t4",
+     "com.tencent.mm.ui.chatting.gallery.u",
+     "com.tencent.mm.ui.chatting.viewitems.ChattingItemDyeingTemplate",
+     "com.tencent.mm.ui.chatting.viewitems.mn",
+     "com.tencent.mm.ui.chatting.viewitems.mo",
+     "com.tencent.mm.ui.chatting.viewitems.p0",
+     "com.tencent.mm.ui.chatting.viewitems.sb",
+     "com.tencent.mm.ui.chatting.viewitems.tn",
+     "com.tencent.mm.ui.chatting.viewitems.u0",
+     "com.tencent.mm.ui.chatting.viewitems.u9",
+     "com.tencent.mm.ui.chatting.viewitems.ud",
+     "com.tencent.mm.ui.chatting.viewitems.vo",
+     "com.tencent.mm.ui.chatting.viewitems.wj",
+     "com.tencent.mm.ui.chatting.viewitems.zd",
+     "com.tencent.mm.ui.chatting.w4",
+     "com.tencent.mm.ui.chatting.wc",
+     "com.tencent.mm.ui.chatting.xc",
+     "com.tencent.mm.ui.chatting.y4",
+     "com.tencent.mm.ui.chatting.zc"
+    ],
+    "chat_quick_select": "com.tencent.mm.ui.chatting.component.a1",
+    "chatting_adapter_v3": "com.tencent.mm.ui.chatting.adapter.k",
+    "chatting_context": "yb5.d",
+    "core_storage": "gm0.b0",
     "emoji_panel": "lr.p",
     "gallery": "com.tencent.mm.ui.chatting.gallery.ImageGalleryUI",
+    "mm_kernel": "gm0.j1",
+    "modify_contact_label": "e93.e",
     "msg": "com.tencent.mm.storage.f9",
+    "net_scene_queue": "com.tencent.mm.modelbase.r1",
     "qr_scan": "e04.p",
     "sns_ad": "com.tencent.mm.plugin.sns.storage.ADInfo",
     "sns_db": [
@@ -171,20 +406,81 @@
      "d95.b0",
      "d95.z"
     ],
-    "sport_detector": "com.tencent.mm.plugin.sport.model.h",
+    "sport_detector": "com.tencent.mm.plugin.sport.model.g",
     "sport_push_detector": "com.tencent.mm.plugin.sport.model.m",
     "sport_util": "com.tencent.mm.plugin.sport.model.c0",
-    "sysmsg_parser": "com.tencent.mm.sdk.platformtools.aa"
+    "sqlite_db_wrapper": "d95.b0",
+    "sysmsg_parser": "com.tencent.mm.sdk.platformtools.aa",
+    "transform_component": "com.tencent.mm.ui.chatting.component.xm"
    }
   },
   "8.0.76": {
    "code": 3140,
    "slots": {
+    "add_contact_label": "aa3.a",
+    "api_manager": "com.tencent.mm.ui.chatting.manager.c",
     "care_mode": "com.tencent.mm.plugin.setting.ui.setting.SettingsCareModeIntro",
     "chat_adapter": "com.tencent.mm.ui.chatting.adapter.k",
+    "chat_bind_mvvm": "ve5.g#h",
+    "chat_footer": "com.tencent.mm.pluginsdk.ui.chat.ChatFooter",
+    "chat_menu": [
+     "com.tencent.mm.ui.chatting.component.io",
+     "com.tencent.mm.ui.chatting.component.m5",
+     "com.tencent.mm.ui.chatting.e0",
+     "com.tencent.mm.ui.chatting.gallery.ImageGalleryUI$$e",
+     "com.tencent.mm.ui.chatting.qd",
+     "com.tencent.mm.ui.chatting.uc",
+     "com.tencent.mm.ui.chatting.view.FoldableChatTextItemView",
+     "com.tencent.mm.ui.chatting.viewitems.n3",
+     "com.tencent.mm.ui.chatting.viewitems.o5",
+     "com.tencent.mm.ui.chatting.viewitems.s9"
+    ],
+    "chat_menu_select": [
+     "com.tencent.mm.ui.chatting.component.n5",
+     "com.tencent.mm.ui.chatting.component.w9",
+     "com.tencent.mm.ui.chatting.f0",
+     "com.tencent.mm.ui.chatting.gallery.ImageGalleryUI$$b0",
+     "com.tencent.mm.ui.chatting.gallery.i0",
+     "com.tencent.mm.ui.chatting.he",
+     "com.tencent.mm.ui.chatting.presenter.f5",
+     "com.tencent.mm.ui.chatting.presenter.g2",
+     "com.tencent.mm.ui.chatting.presenter.g4",
+     "com.tencent.mm.ui.chatting.presenter.h",
+     "com.tencent.mm.ui.chatting.presenter.k6",
+     "com.tencent.mm.ui.chatting.presenter.s0",
+     "com.tencent.mm.ui.chatting.presenter.w1",
+     "com.tencent.mm.ui.chatting.presenter.w3",
+     "com.tencent.mm.ui.chatting.presenter.w5",
+     "com.tencent.mm.ui.chatting.qd",
+     "com.tencent.mm.ui.chatting.t",
+     "com.tencent.mm.ui.chatting.viewitems.ac",
+     "com.tencent.mm.ui.chatting.viewitems.ao",
+     "com.tencent.mm.ui.chatting.viewitems.bp",
+     "com.tencent.mm.ui.chatting.viewitems.ca",
+     "com.tencent.mm.ui.chatting.viewitems.ce",
+     "com.tencent.mm.ui.chatting.viewitems.he",
+     "com.tencent.mm.ui.chatting.viewitems.ho",
+     "com.tencent.mm.ui.chatting.viewitems.j3",
+     "com.tencent.mm.ui.chatting.viewitems.ka",
+     "com.tencent.mm.ui.chatting.viewitems.kp",
+     "com.tencent.mm.ui.chatting.viewitems.o2$$k1",
+     "com.tencent.mm.ui.chatting.viewitems.p0",
+     "com.tencent.mm.ui.chatting.viewitems.p9",
+     "com.tencent.mm.ui.chatting.viewitems.pb",
+     "com.tencent.mm.ui.chatting.viewitems.pn",
+     "com.tencent.mm.ui.chatting.viewitems.s9",
+     "com.tencent.mm.ui.chatting.xc"
+    ],
+    "chat_quick_select": "com.tencent.mm.ui.chatting.component.a1",
+    "chatting_adapter_v3": "com.tencent.mm.ui.chatting.adapter.k",
+    "chatting_context": "fd5.d",
+    "core_storage": "hm0.b0",
     "emoji_panel": "or.p",
     "gallery": "com.tencent.mm.ui.chatting.gallery.ImageGalleryUI",
+    "mm_kernel": "hm0.j1",
+    "modify_contact_label": "aa3.e",
     "msg": "com.tencent.mm.storage.e9",
+    "net_scene_queue": "com.tencent.mm.modelbase.r1",
     "qr_scan": "h14.u",
     "sns_ad": "com.tencent.mm.plugin.sns.storage.ADInfo",
     "sns_db": [
@@ -195,20 +491,64 @@
      "ka5.b0",
      "ka5.z"
     ],
-    "sport_detector": "com.tencent.mm.plugin.sport.model.h",
+    "sport_detector": "com.tencent.mm.plugin.sport.model.g",
     "sport_push_detector": "com.tencent.mm.plugin.sport.model.m",
     "sport_util": "com.tencent.mm.plugin.sport.model.c0",
-    "sysmsg_parser": "com.tencent.mm.sdk.platformtools.aa"
+    "sqlite_db_wrapper": "ka5.b0",
+    "sysmsg_parser": "com.tencent.mm.sdk.platformtools.aa",
+    "transform_component": "com.tencent.mm.ui.chatting.component.ym"
    }
   },
   "8.0.77": {
    "code": 3160,
    "slots": {
+    "add_contact_label": "jd3.a",
+    "api_manager": "com.tencent.mm.ui.chatting.manager.c",
     "care_mode": "com.tencent.mm.plugin.setting.ui.setting.SettingsCareModeIntro",
     "chat_adapter": "com.tencent.mm.ui.chatting.adapter.k",
+    "chat_bind_mvvm": "zh5.g#h",
+    "chat_footer": "com.tencent.mm.pluginsdk.ui.chat.ChatFooter",
+    "chat_menu": [
+     "com.tencent.mm.ui.chatting.component.zf",
+     "com.tencent.mm.ui.chatting.history.MsgHistoryGalleryUI",
+     "com.tencent.mm.ui.chatting.viewitems.aq",
+     "com.tencent.mm.ui.chatting.viewitems.f1",
+     "com.tencent.mm.ui.chatting.viewitems.kk",
+     "com.tencent.mm.ui.chatting.viewitems.ok",
+     "com.tencent.mm.ui.chatting.viewitems.qh",
+     "com.tencent.mm.ui.chatting.viewitems.tp"
+    ],
+    "chat_menu_select": [
+     "com.tencent.mm.ui.chatting.a2",
+     "com.tencent.mm.ui.chatting.component.fb",
+     "com.tencent.mm.ui.chatting.component.j",
+     "com.tencent.mm.ui.chatting.component.kj",
+     "com.tencent.mm.ui.chatting.component.o2",
+     "com.tencent.mm.ui.chatting.component.od",
+     "com.tencent.mm.ui.chatting.gallery.AppBrandHistoryListUI",
+     "com.tencent.mm.ui.chatting.gallery.e5",
+     "com.tencent.mm.ui.chatting.history.MsgHistoryGalleryUI",
+     "com.tencent.mm.ui.chatting.viewitems.a8",
+     "com.tencent.mm.ui.chatting.viewitems.b0",
+     "com.tencent.mm.ui.chatting.viewitems.f8",
+     "com.tencent.mm.ui.chatting.viewitems.fk",
+     "com.tencent.mm.ui.chatting.viewitems.lk",
+     "com.tencent.mm.ui.chatting.viewitems.pk",
+     "com.tencent.mm.ui.chatting.viewitems.rh",
+     "com.tencent.mm.ui.chatting.viewitems.u6",
+     "com.tencent.mm.ui.chatting.viewitems.v0",
+     "com.tencent.mm.ui.chatting.viewitems.vk"
+    ],
+    "chat_quick_select": "com.tencent.mm.ui.chatting.component.a1",
+    "chatting_adapter_v3": "com.tencent.mm.ui.chatting.adapter.k",
+    "chatting_context": "jg5.d",
+    "core_storage": "ho0.b0",
     "emoji_panel": "ur.p",
     "gallery": "com.tencent.mm.ui.chatting.gallery.ImageGalleryUI",
+    "mm_kernel": "ho0.j1",
+    "modify_contact_label": "jd3.e",
     "msg": "com.tencent.mm.storage.e9",
+    "net_scene_queue": "com.tencent.mm.modelbase.r1",
     "qr_scan": "i44.u",
     "rng": "com.tencent.mm.sdk.platformtools.v8",
     "sns_ad": "com.tencent.mm.plugin.sns.storage.ADInfo",
@@ -220,10 +560,12 @@
      "nd5.b0",
      "nd5.z"
     ],
-    "sport_detector": "com.tencent.mm.plugin.sport.model.h",
+    "sport_detector": "com.tencent.mm.plugin.sport.model.g",
     "sport_push_detector": "com.tencent.mm.plugin.sport.model.m",
     "sport_util": "com.tencent.mm.plugin.sport.model.c0",
-    "sysmsg_parser": "com.tencent.mm.sdk.platformtools.ca"
+    "sqlite_db_wrapper": "nd5.b0",
+    "sysmsg_parser": "com.tencent.mm.sdk.platformtools.ca",
+    "transform_component": "com.tencent.mm.ui.chatting.component.oo"
    }
   },
   "8.0.78": {
@@ -231,12 +573,43 @@
    "slots": {
     "ad_appbrand": "com.tencent.mm.plugin.appbrand.d7",
     "ad_open": "lc1.j",
+    "add_contact_label": "mf3.a",
+    "api_manager": "com.tencent.mm.ui.chatting.manager.c",
     "care_mode": "com.tencent.mm.plugin.setting.ui.setting.SettingsCareModeIntro",
     "chat_adapter": "com.tencent.mm.ui.chatting.adapter.k",
+    "chat_bind_mvvm": "xl5.g#h",
     "chat_binder": "xl5.g",
+    "chat_footer": "com.tencent.mm.pluginsdk.ui.chat.ChatFooter",
+    "chat_menu": [
+     "com.tencent.mm.ui.chatting.component.ag",
+     "com.tencent.mm.ui.chatting.gallery.ImageGalleryUI$$f0",
+     "com.tencent.mm.ui.chatting.gallery.ec",
+     "com.tencent.mm.ui.chatting.gallery.hc",
+     "com.tencent.mm.ui.chatting.presenter.l6",
+     "com.tencent.mm.ui.chatting.presenter.s2",
+     "com.tencent.mm.ui.chatting.view.a1"
+    ],
+    "chat_menu_select": [
+     "com.tencent.mm.ui.chatting.component.j",
+     "com.tencent.mm.ui.chatting.component.jb",
+     "com.tencent.mm.ui.chatting.gallery.FinderFeedHistoryListUI",
+     "com.tencent.mm.ui.chatting.gallery.MediaHistoryListUI",
+     "com.tencent.mm.ui.chatting.gallery.i1",
+     "com.tencent.mm.ui.chatting.gallery.q",
+     "com.tencent.mm.ui.chatting.gallery.r3",
+     "com.tencent.mm.ui.chatting.presenter.j3",
+     "com.tencent.mm.ui.chatting.viewitems.ol"
+    ],
+    "chat_quick_select": "com.tencent.mm.ui.chatting.component.a1",
+    "chatting_adapter_v3": "com.tencent.mm.ui.chatting.adapter.k",
+    "chatting_context": "gk5.d",
+    "core_storage": "gp0.b0",
     "emoji_panel": "vr.p",
     "gallery": "com.tencent.mm.ui.chatting.gallery.ImageGalleryUI",
+    "mm_kernel": "gp0.j1",
+    "modify_contact_label": "mf3.e",
     "msg": "com.tencent.mm.storage.e9",
+    "net_scene_queue": "com.tencent.mm.modelbase.r1",
     "qr_scan": "v74.v",
     "rng": "com.tencent.mm.sdk.platformtools.y8",
     "sns_ad": "com.tencent.mm.plugin.sns.storage.ADInfo",
@@ -248,21 +621,78 @@
      "kh5.b0",
      "kh5.z"
     ],
-    "sport_detector": "com.tencent.mm.plugin.sport.model.h",
+    "sport_detector": "com.tencent.mm.plugin.sport.model.g",
     "sport_push_detector": "com.tencent.mm.plugin.sport.model.m",
     "sport_util": "com.tencent.mm.plugin.sport.model.c0",
-    "sysmsg_parser": "com.tencent.mm.sdk.platformtools.fa"
+    "sqlite_db_wrapper": "kh5.b0",
+    "sysmsg_parser": "com.tencent.mm.sdk.platformtools.fa",
+    "transform_component": "com.tencent.mm.ui.chatting.component.vo"
    }
   },
   "8.0.79": {
    "code": 3200,
    "slots": {
     "ad_appbrand": "com.tencent.mm.plugin.appbrand.f7",
+    "ad_open": "vc1.j",
+    "add_contact_label": "mg3.a",
+    "api_manager": "com.tencent.mm.ui.chatting.manager.c",
     "care_mode": "com.tencent.mm.plugin.setting.ui.setting.SettingsCareModeIntro",
     "chat_adapter": "com.tencent.mm.ui.chatting.adapter.k",
+    "chat_bind_mvvm": "vm5.g#h",
+    "chat_binder": "go.b",
+    "chat_footer": "com.tencent.mm.pluginsdk.ui.chat.ChatFooter",
+    "chat_menu": [
+     "com.tencent.mm.ui.chatting.component.b9",
+     "com.tencent.mm.ui.chatting.component.f8",
+     "com.tencent.mm.ui.chatting.component.fa",
+     "com.tencent.mm.ui.chatting.component.ha",
+     "com.tencent.mm.ui.chatting.component.in",
+     "com.tencent.mm.ui.chatting.component.ja",
+     "com.tencent.mm.ui.chatting.component.tf",
+     "com.tencent.mm.ui.chatting.gallery.ImageGalleryUI$$i0",
+     "com.tencent.mm.ui.chatting.view.d",
+     "com.tencent.mm.ui.chatting.viewitems.ki"
+    ],
+    "chat_menu_select": [
+     "com.tencent.mm.ui.chatting.bd",
+     "com.tencent.mm.ui.chatting.component.b9",
+     "com.tencent.mm.ui.chatting.component.cj",
+     "com.tencent.mm.ui.chatting.component.e6",
+     "com.tencent.mm.ui.chatting.component.en",
+     "com.tencent.mm.ui.chatting.component.f9",
+     "com.tencent.mm.ui.chatting.component.he",
+     "com.tencent.mm.ui.chatting.component.ij",
+     "com.tencent.mm.ui.chatting.component.j",
+     "com.tencent.mm.ui.chatting.component.ob",
+     "com.tencent.mm.ui.chatting.component.ue",
+     "com.tencent.mm.ui.chatting.component.uf",
+     "com.tencent.mm.ui.chatting.gallery.ImageGalleryUI$$i",
+     "com.tencent.mm.ui.chatting.viewitems.ChattingItemDyeingTemplate$$e",
+     "com.tencent.mm.ui.chatting.viewitems.fc",
+     "com.tencent.mm.ui.chatting.viewitems.ga",
+     "com.tencent.mm.ui.chatting.viewitems.he",
+     "com.tencent.mm.ui.chatting.viewitems.k9",
+     "com.tencent.mm.ui.chatting.viewitems.kj",
+     "com.tencent.mm.ui.chatting.viewitems.ko",
+     "com.tencent.mm.ui.chatting.viewitems.lp",
+     "com.tencent.mm.ui.chatting.viewitems.me",
+     "com.tencent.mm.ui.chatting.viewitems.oa",
+     "com.tencent.mm.ui.chatting.viewitems.ro",
+     "com.tencent.mm.ui.chatting.viewitems.ub",
+     "com.tencent.mm.ui.chatting.viewitems.up",
+     "com.tencent.mm.ui.chatting.viewitems.zn",
+     "com.tencent.mm.ui.chatting.xc"
+    ],
+    "chat_quick_select": "com.tencent.mm.ui.chatting.component.a1",
+    "chatting_adapter_v3": "com.tencent.mm.ui.chatting.adapter.k",
+    "chatting_context": "el5.d",
+    "core_storage": "pp0.a0",
     "emoji_panel": "vr.p",
     "gallery": "com.tencent.mm.ui.chatting.gallery.ImageGalleryUI",
+    "mm_kernel": "pp0.i1",
+    "modify_contact_label": "mg3.e",
     "msg": "com.tencent.mm.storage.e9",
+    "net_scene_queue": "com.tencent.mm.modelbase.s1",
     "qr_scan": "p84.v",
     "rng": "com.tencent.mm.sdk.platformtools.v8",
     "sns_ad": "com.tencent.mm.plugin.sns.storage.ADInfo",
@@ -274,10 +704,12 @@
      "ii5.b0",
      "ii5.z"
     ],
-    "sport_detector": "com.tencent.mm.plugin.sport.model.h",
+    "sport_detector": "com.tencent.mm.plugin.sport.model.g",
     "sport_push_detector": "com.tencent.mm.plugin.sport.model.m",
     "sport_util": "com.tencent.mm.plugin.sport.model.c0",
-    "sysmsg_parser": "com.tencent.mm.sdk.platformtools.da"
+    "sqlite_db_wrapper": "ii5.b0",
+    "sysmsg_parser": "com.tencent.mm.sdk.platformtools.da",
+    "transform_component": "com.tencent.mm.ui.chatting.component.hp"
    }
   }
  }

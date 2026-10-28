@@ -62,6 +62,53 @@ final class Ui {
         return dp(ctx, 24);
     }
 
+    /**
+     * 底部系统栏高度（导航栏 / 手势条）。
+     *
+     * targetSdk 35（Android 15 起强制 edge-to-edge）时窗口会画到导航栏下面，
+     * 页面只留固定 26dp 会在三键导航的设备上被挡住最后一行 ⇒ 这里把系统栏高度补上。
+     * 手势导航下该 dimen 通常只有 ~24dp，取不到就按 24dp 兜底。
+     */
+    static int navBarPx(Context ctx) {
+        try {
+            int id = ctx.getResources().getIdentifier("navigation_bar_height", "dimen", "android");
+            if (id > 0) {
+                int h = ctx.getResources().getDimensionPixelSize(id);
+                if (h > 0) return h;
+            }
+        } catch (Throwable ignored) {
+            // 继续往下
+        }
+        return dp(ctx, 24);
+    }
+
+    /**
+     * 关掉系统的「强制深色」（Android 10+ 的 force dark）。
+     *
+     * 面板是自己画的浅色界面，代码里没写深色配色；系统在深色模式下会把浅色底强制反转，
+     * 我们写死的文字色不跟着转 ⇒ 深色设备上会出现「浅字 + 浅底」。这一句让界面保持原色。
+     */
+    static void noForceDark(android.app.Activity a) {
+        try {
+            if (Build.VERSION.SDK_INT >= 29 && a != null && a.getWindow() != null) {
+                a.getWindow().getDecorView().setForceDarkAllowed(false);
+            }
+        } catch (Throwable ignored) {
+            // 老系统没有这个 API，忽略
+        }
+    }
+
+    /** 面板是 Dialog 不是 Activity，同一个开关要按 Window 关一次。 */
+    static void noForceDark(android.view.Window win) {
+        try {
+            if (Build.VERSION.SDK_INT >= 29 && win != null) {
+                win.getDecorView().setForceDarkAllowed(false);
+            }
+        } catch (Throwable ignored) {
+            // 老系统忽略
+        }
+    }
+
     static GradientDrawable round(Context ctx, int color, float radiusDp) {
         GradientDrawable d = new GradientDrawable();
         d.setColor(color);
@@ -89,7 +136,8 @@ final class Ui {
         LinearLayout root = column(ctx);
         root.setBackgroundColor(BG);
         int pad = dp(ctx, 16);
-        root.setPadding(pad, dp(ctx, 16) + statusBarPx(ctx), pad, dp(ctx, 26));
+        root.setPadding(pad, dp(ctx, 16) + statusBarPx(ctx), pad,
+                dp(ctx, 26) + navBarPx(ctx));
         return root;
     }
 

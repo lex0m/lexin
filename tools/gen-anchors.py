@@ -49,7 +49,9 @@ SLOTS = {
         "pkg": "",
         "simple": r"^[a-z0-9]{1,4}$",
         "method": "h(*,*,int,int,boolean,java.util.List):void",
-        "seed": ["xl5.g"],
+        # go.b = 8.0.79(android3200) 里按 method 指纹唯一命中的真实类名；
+        # xl5.g 是旧种子（在 8.0.79 上是别的类，会 fingerprint mismatch）
+        "seed": ["go.b", "xl5.g"],
         "note": "同签名的绑定器很多，只认版本表/种子，不自动扫",
         "scan": False,
     },
@@ -112,8 +114,44 @@ SLOTS = {
         "pkg": "",
         "simple": r"^[a-z0-9]{1,4}$",
         "method": "a(com.tencent.mm.plugin.appbrand.config.AppBrandInitConfigWC):boolean",
-        "seed": ["lc1.j"],
+        # vc1.j = 8.0.79(android3200) 里按 method 指纹唯一命中的真实类名；lc1.j 是旧种子
+        "seed": ["vc1.j", "lc1.j"],
         "scan": False,
+    },
+    # ── 转发增强：三个字符串特征槽位（WeKit 同款定位法） ──
+    # 微信自己的 MM 菜单 API：方法名没混淆 → 按名字定位，天然跨版本
+    # 照抄成品 WAuxiliary 的配方（★4037，就是设备上的 me.hd.wauxv）：
+    #   searchPackages("com.tencent.mm.ui.chatting.viewitems")
+    #   usingStrings("MicroMsg.ChattingItem", "msg is null!")            ← 菜单构造点
+    # 它的匹配是"包含"语义，字符串真实形式是 "msg is null! pos:%s"。
+    # 微信自己的 MM 菜单 API：onCreateMMMenu / onMMMenuItemSelected 这两个名字**没混淆**
+    # （日志实测：8.0.78 上是 ui.chatting.component.ag 与 ui.chatting.presenter.l6）
+    "chat_menu": {
+        "pkg": "com.tencent.mm.ui.chatting",
+        "simple": r"^.+$",
+        "method": "onCreateMMMenu(*):void",
+        "multi": True,
+        "allHits": True,
+        "maxHits": 40,
+        "scan": True,
+        "note": "长按菜单构造点（按未混淆方法名定位）",
+    },
+    "chat_menu_select": {
+        "pkg": "com.tencent.mm.ui.chatting",
+        "simple": r"^.+$",
+        "method": "onMMMenuItemSelected(android.view.MenuItem,int):void",
+        "multi": True,
+        "allHits": True,
+        "maxHits": 40,
+        "scan": True,
+        "note": "菜单点击回调（按未混淆方法名定位）",
+    },
+    "chat_quick_select": {
+        "pkg": "",
+        "simple": r"^.+$",
+        "strings": ["MicroMsg.ChatItemQuickSelectComponent"],
+        "scan": False,
+        "note": "多选组件（解除多选上限用）",
     },
     # ── 微信运动：三个字符串特征槽位（插件包名不混淆，但类名混淆，靠日志 tag / provider URI 认） ──
     "sport_util": {
@@ -157,6 +195,95 @@ SLOTS = {
         "seed": ["com.tencent.mm.plugin.sns.storage.ADInfo"],
         "scan": True,
         "note": "WeKit 同款思路：掐掉广告对象的构造，条目就不会进时间线",
+    },
+    # ── v1.3 自动语音转文字：调微信官方「转文字」组件（低风险官方接口，不碰第三方 ASR） ──
+    # 坐标照抄 CrackerCat/wcx 的 AutoSpeechToText（DexKit usingEqStrings → 这里 strings 类级匹配）。
+    "transform_component": {
+        "pkg": "com.tencent.mm.ui.chatting.component",
+        "simple": r"^.+$",
+        "strings": ["MicroMsg.TransformComponent", "[onChattingPause]"],
+        "scan": False,
+        "note": "转文字组件：收到语音自动调它转文字",
+    },
+    "chat_bind_mvvm": {
+        "pkg": "",
+        "simple": r"^.+$",
+        "strings": ["MicroMsg.MvvmChattingItem", "[onBindView]"],
+        "emitMethod": "[onBindView]",
+        "scan": False,
+        "note": "消息 View 绑定点（识别新进语音消息）",
+    },
+    "chatting_context": {
+        "pkg": "",
+        "simple": r"^.+$",
+        "strings": ["MicroMsg.ChattingContext", "[notifyDataSetChange]"],
+        "scan": False,
+        "note": "聊天上下文（取 apiManager 拿组件实例）",
+    },
+    "chatting_adapter_v3": {
+        "pkg": "",
+        "simple": r"^.+$",
+        "strings": ["MicroMsg.ChattingDataAdapterV3", "[handleMsgChange] isLockNotify:"],
+        "scan": False,
+        "note": "聊天数据适配器（getItem 取消息）",
+    },
+    "api_manager": {
+        "pkg": "com.tencent.mm.ui.chatting.manager",
+        "simple": r"^.+$",
+        "strings": ["[get] ", " is not a interface!"],
+        "scan": False,
+        "note": "聊天组件管理器（getApi 按接口拿组件）",
+    },
+    # ── v1.3 悬浮聊天底栏：ChatFooter 类名长期未混淆，但走锚点统一适配状态 ──
+    "chat_footer": {
+        "exact": "com.tencent.mm.pluginsdk.ui.chat.ChatFooter",
+        "scan": False,
+        "note": "聊天底部输入栏（悬浮卡片化：圆角/阴影/侧边距）",
+    },
+    # ── v1.3 批量分类标签：走微信官方 netscene（CGI 路径），不伪造上行报文 ──
+    "net_scene_queue": {
+        "pkg": "",
+        "simple": r"^.+$",
+        "strings": ["MicroMsg.NetSceneQueue", "forbid in waiting: type=", "forbid in running: type="],
+        "scan": False,
+        "note": "网络请求队列（addNetSceneToQueue 发 netscene；方法在运行时按签名定位）",
+    },
+    "mm_kernel": {
+        "pkg": "",
+        "simple": r"^.+$",
+        "strings": ["MicroMsg.MMKernel", "Kernel not null, has initialized."],
+        "scan": False,
+        "note": "MMKernel（拿 netSceneQueue / coreStorage）",
+    },
+    "add_contact_label": {
+        "pkg": "",
+        "simple": r"^.+$",
+        "strings": ["/cgi-bin/micromsg-bin/addcontactlabel"],
+        "ctor": "<init>(java.lang.String):void",
+        "scan": False,
+        "note": "新建标签 netscene（构造器收标签名）",
+    },
+    "modify_contact_label": {
+        "pkg": "",
+        "simple": r"^.+$",
+        "strings": ["/cgi-bin/micromsg-bin/modifycontactlabellist"],
+        "ctor": "<init>(java.util.LinkedList):void",
+        "scan": False,
+        "note": "批量改标签 netscene（构造器收联系人标签列表）",
+    },
+    "core_storage": {
+        "pkg": "",
+        "simple": r"^.+$",
+        "strings": ["MMKernel.CoreStorage", "CheckData path[%s] blocksize:%s blockcount:%s availcount:%s"],
+        "scan": False,
+        "note": "核心存储（拿进程内已打开的微信数据库）",
+    },
+    "sqlite_db_wrapper": {
+        "pkg": "",
+        "simple": r"^.+$",
+        "strings": ["MicroMsg.SqliteDB", "sql is null "],
+        "scan": False,
+        "note": "SQLite 包装（拿 WCDB SQLiteDatabase 实例）",
     },
 }
 
@@ -274,12 +401,14 @@ class Dex:
                 off = base + i * 2
                 if off + 6 > len(self.d):
                     break
-                op = struct.unpack_from("<H", self.d, off)[0]
-                if op == 0x1a:
+                # DEX 的 const-string 第一个 code unit = (寄存器 << 8) | opcode，
+                # 所以必须只看低字节；直接和 0x1a 比会永远不匹配（这就是之前"字符串不存在"的根因）。
+                op = struct.unpack_from("<H", self.d, off)[0] & 0xFF
+                if op == 0x1A:
                     idx = struct.unpack_from("<H", self.d, off + 2)[0]
                     if idx < self.n_string:
                         out.add(self.string(idx))
-                elif op == 0x1b:
+                elif op == 0x1B:
                     idx = struct.unpack_from("<I", self.d, off + 2)[0]
                     if idx < self.n_string:
                         out.add(self.string(idx))
@@ -373,7 +502,9 @@ def sig_match(expected, name, ret, params):
     en = expected[:lp]
     ep = [] if not expected[lp + 1:rp] else expected[lp + 1:rp].split(",")
     er = expected[colon + 1:]
-    if en != name or len(ep) != len(params):
+    if en != "*" and en != name:
+        return False
+    if len(ep) != len(params):
         return False
     for a, b in zip(ep, params):
         if not type_match(a.strip(), b):
@@ -416,8 +547,17 @@ def matches(index, name, rule):
     # 注意：dexkit 的语义是"这个方法所在的类用到这些字符串"，字符串和方法体不一定在同一个方法里，
     # 所以这里当成**类级**条件；参数形状另算一条。
     wanted = rule.get("strings", [])
-    if wanted and not any(set(wanted).issubset(strs) for _n, _r, _p, strs in methods):
-        return False
+    if wanted:
+        # dexkit 的 usingEqStrings 是**包含**语义：写 "msg is null!" 能命中 "msg is null! pos:%s"。
+        # 之前这里按精确相等找，导致"字符串不存在"的误判 —— 白干四轮。
+        # ★ 类级语义：把类里所有方法引用的字符串做并集，再要求包含全部 wanted 字符串。
+        #   之前是「单个方法包含全部」—— 字符串分散在不同方法（如日志 tag 与消息）时会误判"未命中"。
+        all_strs = set()
+        for _n, _r, _p, strs in methods:
+            all_strs.update(strs)
+        for w in wanted:
+            if not any(w in s for s in all_strs):
+                return False
 
     if rule.get("shape") == "activity_string_15_16":
         ok = False
@@ -505,7 +645,32 @@ def resolve(index, rule):
     hits.sort(key=lambda s: (len(s), s))
     if rule.get("strings"):
         # 靠方法内字符串常量定位的是"特征命中"，可信，不算猜测
+        if rule.get("emitMethod") and hits:
+            cls = hits[0]
+            _sup, methods, _fields = index.classes[cls]
+            wanted = rule.get("strings", [])
+            # 输出「类#方法」时，方法 = 类里同时引用全部 wanted 字符串的那个方法
+            # （wcx 的 dexMethod 定位就是这个语义：addNetSceneToQueue 里同时有 tag 和两条日志）
+            for n, r, p, strs in methods:
+                if all(any(w in s for s in strs) for w in wanted):
+                    return ["%s#%s" % (cls, n)], "strings"
+            return hits[:1], "strings"
         return hits[:1], "strings"
+    if rule.get("allHits"):
+        # 实现者天然分散在多个包/多个类里，全都要：少挂一个就少一个入口。
+        limit = rule.get("maxHits", 60)
+        out = sorted(hits)[:limit]
+        marker = rule.get("emitMethod")          # 需要"类#方法"输出时，把方法名也带上
+        if marker:
+            named = []
+            for cls in out:
+                _sup, methods, _fields = index.classes[cls]
+                for n, r, p, strs in methods:
+                    if any(marker in s for s in strs):
+                        named.append("%s#%s" % (cls, n))
+                        break
+            out = named
+        return out, "scan"
     if rule.get("multi"):
         # 同一批库对象通常在同一个混淆包里：取「同包成员最多」的那一组，
         # 避免把基类（另一个包）也挂上，重复拦一次。
@@ -513,7 +678,8 @@ def resolve(index, rule):
         for h in hits:
             groups.setdefault(h.rsplit(".", 1)[0], []).append(h)
         best = max(groups.values(), key=len) if groups else []
-        return sorted(best)[:4], "scan"
+        limit = rule.get("maxHits", 4)
+        return sorted(best)[:limit], "scan"
     return hits[:1], "scan"
 
 
@@ -545,7 +711,9 @@ def main():
             # 「猜」出来的名字（既不是种子也不是规则唯一命中）不进表：
             # 表里只放可信结果，剩下的交给设备上的运行时扫描。挂错类比少一个功能更糟。
             if how == "scan" and not rule.get("scan") and not rule.get("multi") \
-                    and not rule.get("strings"):
+                    and not rule.get("strings") and len(hits) != 1:
+                # 唯一命中（method 指纹只匹配到一个类）是强证据 → 入表；
+                # 多候选/零候选才丢弃（挂错类比少一个功能更糟）。
                 print("       ? %-14s 仅猜测 %d 个候选，不入表: %s"
                       % (slot, len(hits), ", ".join(hits[:3])))
                 hits = []

@@ -124,9 +124,22 @@ final class AutoScan {
         List<byte[]> prefixes = new ArrayList<>();
         List<String> prefixSlot = new ArrayList<>();
         List<String> broad = new ArrayList<>();
+        // strings 特征槽位：解析 dex 方法体 const-string 定位（安卓17/新微信版本不在表里时的兼容兜底）
+        List<String> stringSlots = new ArrayList<>();
+        List<String[]> stringWanteds = new ArrayList<>();
         for (String slot : want) {
             JSONObject r = Anchors.rule(slot);
-            if (r != null && !r.optBoolean("scan", true)) continue;   // 签名可能撞车，只认版本表
+            if (r != null && !r.optBoolean("scan", true)
+                    && r.optJSONArray("strings") == null) continue;   // 签名可能撞车，只认版本表（strings 特征除外）
+            org.json.JSONArray stringsArr = r == null ? null : r.optJSONArray("strings");
+            if (stringsArr != null && stringsArr.length() > 0) {
+                // strings 特征槽位：解析 dex 方法体 const-string 定位（安卓17/新微信版本不在表里时的兼容兜底）
+                String[] wanted = new String[stringsArr.length()];
+                for (int i = 0; i < wanted.length; i++) wanted[i] = stringsArr.optString(i, "");
+                stringSlots.add(slot);
+                stringWanteds.add(wanted);
+                continue;
+            }
             String pkg = r == null ? "" : r.optString("pkg", "");
             boolean fingerprinted = r != null
                     && (!r.optString("method", "").isEmpty()
@@ -138,7 +151,7 @@ final class AutoScan {
                 broad.add(slot);
             }
         }
-        if (prefixes.isEmpty() && broad.isEmpty()) {
+        if (prefixes.isEmpty() && broad.isEmpty() && stringSlots.isEmpty()) {
             Log.d(T + "nothing scannable");
             return;
         }
@@ -172,6 +185,16 @@ final class AutoScan {
                     for (String slot : broad) {
                         if (found.containsKey(slot)) continue;
                         pick(slot, loose);
+                    }
+                }
+                // strings 特征槽位：解析 dex 方法体 const-string，按类级字符串并集匹配
+                if (!stringSlots.isEmpty()) {
+                    for (int i = 0; i < stringSlots.size(); i++) {
+                        String slot = stringSlots.get(i);
+                        if (found.containsKey(slot)) continue;
+                        List<String> names = scanStrings(data, stringWanteds.get(i));
+                        if (names.isEmpty()) continue;
+                        learnStrings(slot, names);
                     }
                 }
                 // 都解决了就早点收工
@@ -285,6 +308,164 @@ final class AutoScan {
             return i;
         }
         return -1;
+    }
+
+    /** 直接采纳 strings 扫描命中的类名（类级字符串特征已在校验里），写入缓存。 */
+    private static void learnStrings(String slot, List<String> names) {
+        for (String n : names) {
+            try {
+                Class<?> c = Class.forName(n, false, Features.loader);
+                if (c == null) continue;
+                List<String> hit = new ArrayList<>(1);
+                hit.add(n);
+                found.put(slot, hit);
+                Anchors.learn(slot, n);
+                Log.d(T + "learned(strings) " + slot + " -> " + n);
+                return;
+            } catch (Throwable ignored) {
+                // 下一个
+            }
+        }
+    }
+
+    /** 在单个 dex 里，找「类里所有方法引用的字符串并集包含全部 wanted」的候选类名。 */
+    private static List<String> scanStrings(byte[] d, String[] wanted) {
+        List<String> out = new ArrayList<>();
+        try {
+            int nString = u4(d, 0x38), oString = u4(d, 0x3C);
+            int nType = u4(d, 0x40), oType = u4(d, 0x44);
+            int nMethod = u4(d, 0x58), oMethod = u4(d, 0x5C);
+            int nClass = u4(d, 0x60), oClass = u4(d, 0x64);
+            for (int k = 0; k < nClass && out.size() < 4; k++) {
+                int base = oClass + k * 32;
+                int clsIdx = u4(d, base);
+                String clsName = typeName(d, oType, nType, oString, clsIdx);
+                if (clsName == null) continue;
+                int dataOff = u4(d, base + 24);
+                if (dataOff == 0) continue;
+                java.util.Set<String> allStr = new java.util.HashSet<>();
+                int[] p = {dataOff};
+                int sf = uleb(d, p), inf = uleb(d, p), dm = uleb(d, p), vm = uleb(d, p);
+                int idx = 0;
+                for (int i = 0; i < sf + inf; i++) {
+                    idx += uleb(d, p);
+                    uleb(d, p);
+                }
+                idx = 0;
+                for (int i = 0; i < dm + vm; i++) {
+                    int diff = uleb(d, p);
+                    uleb(d, p);
+                    int codeOff = uleb(d, p);
+                    idx = step(idx, diff, nMethod);
+                    if (codeOff == 0) continue;
+                    collectConstStrings(d, codeOff, nString, oString, allStr);
+                }
+                boolean hit = true;
+                for (String w : wanted) {
+                    if (w == null || w.isEmpty()) continue;
+                    boolean found = false;
+                    for (String s : allStr) {
+                        if (s.contains(w)) {
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        hit = false;
+                        break;
+                    }
+                }
+                if (hit) out.add(clsName);
+            }
+        } catch (Throwable ignored) {
+            // 解析失败就当没有
+        }
+        return out;
+    }
+
+    /** 收集一个方法里所有 const-string / const-string/jumbo 引用的字符串。 */
+    private static void collectConstStrings(byte[] d, int codeOff, int nString, int oString,
+                                            java.util.Set<String> out) {
+        try {
+            if (codeOff <= 0 || codeOff + 16 > d.length) return;
+            int insnsSize = u4(d, codeOff + 12);
+            int base = codeOff + 16;
+            for (int i = 0; i < insnsSize; i++) {
+                int off = base + i * 2;
+                if (off + 6 > d.length) break;
+                int u = u2(d, off);
+                int op = u & 0xFF;
+                if (op == 0x1A) {
+                    int idx = u2(d, off + 2);
+                    if (idx < nString) {
+                        String s = strAt(d, oString, idx);
+                        if (s != null) out.add(s);
+                    }
+                } else if (op == 0x1B) {
+                    int idx = u4(d, off + 2);
+                    if (idx < nString) {
+                        String s = strAt(d, oString, idx);
+                        if (s != null) out.add(s);
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+            // 忽略
+        }
+    }
+
+    private static String typeName(byte[] d, int oType, int nType, int oString, int typeIdx) {
+        if (typeIdx < 0 || typeIdx >= nType) return null;
+        int tbase = oType + typeIdx * 4;
+        int strIdx = u4(d, tbase);
+        String desc = strAt(d, oString, strIdx);
+        if (desc == null) return null;
+        if (desc.startsWith("L") && desc.endsWith(";")) {
+            return desc.substring(1, desc.length() - 1).replace('/', '.');
+        }
+        return null;
+    }
+
+    private static String strAt(byte[] d, int oString, int i) {
+        if (i < 0) return null;
+        int off = u4(d, oString + i * 4);
+        int[] p = {off};
+        uleb(d, p);
+        int s = p[0];
+        int e = s;
+        while (e < d.length && d[e] != 0) e++;
+        if (e > d.length) return null;
+        try {
+            return new String(d, s, e - s, "UTF-8");
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private static int uleb(byte[] d, int[] p) {
+        int r = 0, shift = 0;
+        while (p[0] < d.length) {
+            int b = d[p[0]++] & 0xFF;
+            r |= (b & 0x7F) << shift;
+            shift += 7;
+            if ((b & 0x80) == 0) break;
+        }
+        return r;
+    }
+
+    private static int step(int prev, int diff, int limit) {
+        int nxt = prev + diff;
+        if (nxt >= limit) nxt = diff < limit ? diff : nxt;
+        return nxt;
+    }
+
+    private static int u2(byte[] d, int off) {
+        return (d[off] & 0xFF) | ((d[off + 1] & 0xFF) << 8);
+    }
+
+    private static int u4(byte[] d, int off) {
+        return (d[off] & 0xFF) | ((d[off + 1] & 0xFF) << 8)
+                | ((d[off + 2] & 0xFF) << 16) | ((d[off + 3] & 0xFF) << 24);
     }
 
     private static byte[] read(ZipFile zip, ZipEntry e) {

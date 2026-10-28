@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { PNG } = require('/data/user/0/com.deepseek.harness/files/work/node_modules/pngjs');
 
-const ROOT = '/sdcard/DeepSeekHarness/_scratch/wxstealth';
+const ROOT = '/data/user/0/com.deepseek.harness/files/乐信';
 const src = PNG.sync.read(fs.readFileSync(path.join(ROOT, 'assets/logo-src.png')));
 
 // 中心正方形
@@ -48,7 +48,7 @@ for (const [dir, size] of Object.entries(adaptive)) {
   const d = path.join(ROOT, 'res', dir);
   fs.mkdirSync(d, { recursive: true });
   fs.writeFileSync(path.join(d, 'ic_launcher_foreground.png'), PNG.sync.write(render(size, 0.18)));
-  // 背景层：纯白，与源图底色一致
+  // 背景层：纯白，与源图底色一致（老版本图标，不动）
   const bg = new PNG({ width: size, height: size });
   for (let i = 0; i < size * size; i++) {
     bg.data[i * 4] = 255; bg.data[i * 4 + 1] = 255; bg.data[i * 4 + 2] = 255; bg.data[i * 4 + 3] = 255;

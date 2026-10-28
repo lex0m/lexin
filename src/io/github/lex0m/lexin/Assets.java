@@ -90,6 +90,11 @@ final class Assets {
         return null;
     }
 
+    /** 模块自己的 APK 绝对路径（真实路径，不是描述文字 ✗）。 */
+    static String apk() {
+        return apkPath;
+    }
+
     /** 当前资源读取路径：asset-manager（隐藏 API）/ zip（公开 API）/ 未找到。 */
     static String source() {
         if (am != null) return "asset-manager";

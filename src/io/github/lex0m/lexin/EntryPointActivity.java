@@ -23,6 +23,22 @@ public class EntryPointActivity extends Activity {
     @Override
     protected void onCreate(Bundle saved) {
         super.onCreate(saved);
+
+        // ① 先把自己的设置页拉起来 —— 用户点图标最想看到的就是「全部开关一屏」。
+        //   老版本这里只发广播、然后无声无息 finish()，微信不在前台时等于什么都没发生，
+        //   于是大家都跑去点「外观」那个二级页，以为模块只有美化功能。
+        boolean opened = false;
+        try {
+            Intent s = new Intent();
+            s.setClassName(getPackageName(), getPackageName() + ".SettingsActivity");
+            s.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(s);
+            opened = true;
+        } catch (Throwable ignored) {
+            // 落到下面的提示
+        }
+
+        // ② 顺手通知微信进程：切回微信时把悬浮面板弹出来（微信没在跑就先挂着）
         boolean sent = false;
         try {
             Intent i = new Intent(Bridge.ACTION);
@@ -34,8 +50,8 @@ public class EntryPointActivity extends Activity {
             // 走下面的手动提示
         }
 
-        toast(sent
-                ? "乐信面板已就绪，切回微信就能看到（微信没在运行时请先打开微信）"
+        toast(opened
+                ? (sent ? "已打开设置页；切回微信可看到悬浮面板" : "已打开设置页（微信里长按关怀模式「开启」也能开面板）")
                 : "请在微信里打开：我 → 设置 → 更多 → 关怀模式 → 长按「开启」");
         finish();
         overridePendingTransition(0, 0);

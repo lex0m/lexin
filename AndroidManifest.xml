@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="io.github.lex0m.lexin"
-    android:versionCode="3"
-    android:versionName="1.1">
+    android:versionCode="26"
+    android:versionName="1.4.0">
 
     <uses-sdk android:minSdkVersion="28" android:targetSdkVersion="35" />
 
@@ -16,6 +16,7 @@
     </queries>
 
     <application
+        android:extractNativeLibs="true"
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
@@ -62,6 +63,14 @@
             android:authorities="io.github.lex0m.lexin.bg"
             android:exported="true"
             android:grantUriPermissions="true" />
+
+        <!-- 语音转 MP3：由微信进程里的模块拉起（跨进程做解码，微信进程保持零 native） -->
+        <activity
+            android:name=".ConvertActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
         <!-- Appearance screen: second level, reached from the main menu. -->
         <activity

@@ -8,6 +8,18 @@
 -keep class io.github.lex0m.lexin.SettingsActivity { *; }
 -keep class io.github.lex0m.lexin.ThemeActivity { *; }
 -keep class io.github.lex0m.lexin.BgProvider { *; }
+# ★ 只被 manifest 和字符串（setClassName）引用的组件：R8 看不到引用，会**整类删掉** ✗
+#   2026-10-17 实测：ConvertActivity 在 dex 里连类描述符都不存在 ⇒ 拉起必失败。
+#   新增任何组件（activity/service/receiver/provider）都必须在这里补一条 keep。
+-keep class io.github.lex0m.lexin.ConvertActivity { *; }
+
+# JNI：native 方法被改名 = 找不到符号 = UnsatisfiedLinkError
+-keepclasseswithmembernames class * {
+    native <methods>;
+}
+# ★ 这个名字是 .so 编译时写死的（Java_io_github_lex0m_lexin_SilkCodec_silkToMp3），
+#   重命名类 = 绑定失败。convert 的 native 方法也在这个类里。
+-keep class io.github.lex0m.lexin.SilkCodec { *; }
 
 # Xposed 回调方法改名 = 静默失效
 -keepclassmembers class * extends de.robv.android.xposed.XC_MethodHook {
@@ -21,7 +33,7 @@
 
 # ── 混淆强度 ────────────────────────────────────────────────
 # 类名收进根包、抹掉内部类层级线索；被 keep 的类不受影响
--repackageclasses ''
+-repackageclasses 'x'
 -allowaccessmodification
 # 自造词表，别用 R8 默认的 a/b/c（那种一眼就是混淆过的）
 -obfuscationdictionary obf-dict.txt

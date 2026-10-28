@@ -17,6 +17,14 @@ final class Prefs {
     static final String K_BG = Storage.K_BG;
     static final String K_BG_HOME = Storage.K_BG_HOME;
     static final String K_SCAN = Storage.K_SCAN;
+    /** 转发增强：菜单注入 / 解除多选上限（新功能默认关，用户主动开才动）。 */
+    static final String K_FWD_MENU = "fwd_menu";
+    static final String K_FWD_SELECT = "fwd_select";
+    /** v1.3 新功能开关（默认关，见 Storage 注释）。 */
+    static final String K_VOICE_TEXT = Storage.K_VOICE_TEXT;
+    static final String K_FLOAT_FOOTER = Storage.K_FLOAT_FOOTER;
+    static final String K_BATCH_LABEL = Storage.K_BATCH_LABEL;
+    static final String K_HOME_FLOAT_TAB = Storage.K_HOME_FLOAT_TAB;
 
     /** ctx is ignored now - the store is file based and process independent. */
     static void init(Context ctx) {
@@ -35,7 +43,8 @@ final class Prefs {
      */
     static boolean def(String key) {
         return K_RECALL.equals(key) || K_MOMENTS.equals(key) || K_ADS.equals(key)
-                || K_MEDIA.equals(key) || K_LIMITS.equals(key) || K_SCAN.equals(key);
+                || K_MEDIA.equals(key) || K_LIMITS.equals(key) || K_SCAN.equals(key)
+                || K_FWD_MENU.equals(key) || K_FWD_SELECT.equals(key);   // 转发增强默认开（本地 UI 功能，零联网）
     }
 
     /** 带默认值读取：hook 路径一律用这个，省得两处默认值写岔。 */

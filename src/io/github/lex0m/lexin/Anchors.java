@@ -62,15 +62,44 @@ final class Anchors {
     static final String QR_SCAN = "qr_scan";
     /** 微信运动：SportUtil（各家手机步数来源不同，微信自己适配过）。 */
     static final String SPORT_UTIL = "sport_util";
+    /** 转发增强：长按菜单构造（注入自己的转发项）。 */
+    static final String CHAT_MENU = "chat_menu";
+    /** 转发增强：长按菜单点击回调。 */
+    static final String CHAT_MENU_SELECT = "chat_menu_select";
+    /** 转发增强：多选组件（解除多选上限）。 */
+    static final String CHAT_QUICK_SELECT = "chat_quick_select";
+    /** 转发增强：每种消息类型各自的菜单项构造（覆盖最全的注入点）。 */
+    static final String CHAT_MENU_ITEMS = "chat_menu_items";
+    /** 转发增强：往菜单里加项的方法（任何菜单项都要经过它）。 */
+    static final String MM_MENU_ADD = "mm_menu_add";
     /** 微信运动：自己听计步器的那条路。 */
     static final String SPORT_DETECTOR = "sport_detector";
     /** 微信运动：推送链路听计步器的那条路。 */
     static final String SPORT_PUSH_DETECTOR = "sport_push_detector";
+    // ── v1.3 自动语音转文字（调微信官方「转文字」组件） ──
+    static final String TRANSFORM_COMPONENT = "transform_component";
+    static final String CHAT_BIND_MVVM = "chat_bind_mvvm";
+    static final String CHATTING_CONTEXT = "chatting_context";
+    static final String CHATTING_ADAPTER_V3 = "chatting_adapter_v3";
+    static final String API_MANAGER = "api_manager";
+    // ── v1.3 悬浮聊天底栏 ──
+    static final String CHAT_FOOTER = "chat_footer";
+    // ── v1.3 批量分类标签 ──
+    static final String NET_SCENE_QUEUE = "net_scene_queue";
+    static final String MM_KERNEL = "mm_kernel";
+    static final String ADD_CONTACT_LABEL = "add_contact_label";
+    static final String MODIFY_CONTACT_LABEL = "modify_contact_label";
+    static final String CORE_STORAGE = "core_storage";
+    static final String SQLITE_DB_WRAPPER = "sqlite_db_wrapper";
 
     private static final String[] ALL_SLOTS = {
             SYSMSG, MSG, CHAT_BINDER, CHAT_ADAPTER, RNG, EMOJI_PANEL,
             GALLERY, CARE_MODE, SNS_DB, SNS_DB2, AD_APPBRAND, AD_OPEN, SNS_AD, QR_SCAN,
             SPORT_UTIL, SPORT_DETECTOR, SPORT_PUSH_DETECTOR,
+            CHAT_MENU, CHAT_MENU_SELECT, CHAT_QUICK_SELECT, CHAT_MENU_ITEMS, MM_MENU_ADD,
+            TRANSFORM_COMPONENT, CHAT_BIND_MVVM, CHATTING_CONTEXT, CHATTING_ADAPTER_V3, API_MANAGER,
+            CHAT_FOOTER,
+            NET_SCENE_QUEUE, MM_KERNEL, ADD_CONTACT_LABEL, MODIFY_CONTACT_LABEL, CORE_STORAGE, SQLITE_DB_WRAPPER,
     };
 
     /** 功能 -> 它需要的槽位（面板按功能报适配状态，比按槽位报更好懂）。 */
@@ -86,6 +115,10 @@ final class Anchors {
             {"隐蔽入口", CARE_MODE},
             {"解除扫码限制", QR_SCAN},
             {"运动步数", SPORT_UTIL, SPORT_DETECTOR, SPORT_PUSH_DETECTOR},
+            {"转发增强", CHAT_MENU, CHAT_MENU_SELECT, CHAT_QUICK_SELECT, CHAT_MENU_ITEMS, MM_MENU_ADD},
+            {"自动语音转文字", TRANSFORM_COMPONENT, CHAT_BIND_MVVM, CHATTING_CONTEXT, CHATTING_ADAPTER_V3, API_MANAGER},
+            {"悬浮聊天底栏", CHAT_FOOTER},
+            {"批量分类标签", NET_SCENE_QUEUE, MM_KERNEL, ADD_CONTACT_LABEL, MODIFY_CONTACT_LABEL, CORE_STORAGE, SQLITE_DB_WRAPPER},
     };
 
     // ── 状态 ────────────────────────────────────────────────────────────────
@@ -266,7 +299,42 @@ final class Anchors {
         return out;
     }
 
+    /** 表里可能是 "com.foo.Bar#a"（带方法名）—— 取类名部分。 */
+    static String classNameOf(String entry) {
+        if (entry == null) return null;
+        int i = entry.indexOf('#');
+        return i < 0 ? entry : entry.substring(0, i);
+    }
+
+    /** 表里 "com.foo.Bar#a" 的方法名部分（没有就返回 null）。 */
+    static String methodNameOf(String entry) {
+        if (entry == null) return null;
+        int i = entry.indexOf('#');
+        return i < 0 ? null : entry.substring(i + 1);
+    }
+
+    /** 找一个槽位里"带方法名"的记录，返回 类名#方法名（表里没有就返回 null）。 */
+    static String entryWithMethod(String slot) {
+        init();
+        for (String src : candidates(slot)) {
+            if (src != null && src.contains("#")) return src;
+        }
+        return null;
+    }
+
+    /** 依次尝试：当前版本 → 邻近版本（拿到第一份非空即可）。 */
+    private static List<String> candidates(String slot) {
+        List<String> out = fromVersion(slot, WxVersion.name());
+        if (!out.isEmpty()) return out;
+        for (String v : nearby(WxVersion.name())) {
+            out = fromVersion(slot, v);
+            if (!out.isEmpty()) return out;
+        }
+        return out;
+    }
+
     private static Class<?> verify(String slot, String className, String from) {
+        className = classNameOf(className);
         if (className == null || className.isEmpty()) return null;
         try {
             Class<?> c = Class.forName(className, false, Features.loader);
@@ -351,7 +419,7 @@ final class Anchors {
             String ret = fp.substring(colon + 1).trim();
 
             for (Method m : c.getDeclaredMethods()) {
-                if (!m.getName().equals(name)) continue;
+                if (!"*".equals(name) && !m.getName().equals(name)) continue;   // 方法名支持 * 通配
                 Class<?>[] pt = m.getParameterTypes();
                 if (pt.length != params.length) continue;
                 boolean match = true;
@@ -499,8 +567,25 @@ final class Anchors {
         if (SNS_AD.equals(slot)) return "朋友圈广告";
         if (QR_SCAN.equals(slot)) return "扫码处理";
         if (SPORT_UTIL.equals(slot)) return "步数工具";
+        if (CHAT_MENU.equals(slot)) return "长按菜单";
+        if (CHAT_MENU_SELECT.equals(slot)) return "菜单点击";
+        if (CHAT_QUICK_SELECT.equals(slot)) return "多选组件";
+        if (CHAT_MENU_ITEMS.equals(slot)) return "类型菜单项";
+        if (MM_MENU_ADD.equals(slot)) return "菜单加项";
         if (SPORT_DETECTOR.equals(slot)) return "步数监听";
         if (SPORT_PUSH_DETECTOR.equals(slot)) return "步数推送监听";
+        if (TRANSFORM_COMPONENT.equals(slot)) return "转文字组件";
+        if (CHAT_BIND_MVVM.equals(slot)) return "消息绑定";
+        if (CHATTING_CONTEXT.equals(slot)) return "聊天上下文";
+        if (CHATTING_ADAPTER_V3.equals(slot)) return "聊天适配器";
+        if (API_MANAGER.equals(slot)) return "组件管理器";
+        if (CHAT_FOOTER.equals(slot)) return "聊天输入栏";
+        if (NET_SCENE_QUEUE.equals(slot)) return "网络队列";
+        if (MM_KERNEL.equals(slot)) return "内核入口";
+        if (ADD_CONTACT_LABEL.equals(slot)) return "建标签";
+        if (MODIFY_CONTACT_LABEL.equals(slot)) return "改标签";
+        if (CORE_STORAGE.equals(slot)) return "核心存储";
+        if (SQLITE_DB_WRAPPER.equals(slot)) return "数据库";
         return slot;
     }
 

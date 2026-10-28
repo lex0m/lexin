@@ -22,6 +22,7 @@ public class SettingsActivity extends Activity {
     @Override
     protected void onCreate(Bundle saved) {
         super.onCreate(saved);
+        Ui.noForceDark(this);          // 深色模式下别把浅色界面强制反转
         Prefs.init(getApplicationContext());
         Disclaimer.gate(this, new Runnable() {
             @Override
@@ -56,6 +57,21 @@ public class SettingsActivity extends Activity {
         qFrom.setPadding(Ui.dp(this, 14), 0, Ui.dp(this, 14), Ui.dp(this, 12));
         quote.addView(qFrom);
         root.addView(quote);
+
+        LinearLayout panelCard = Ui.card(this);
+        Ui.section(this, panelCard, "微信悬浮面板", Ui.ACCENT);
+        Ui.actionRow(this, panelCard, "打开微信面板", "点一下 → 切回微信自动弹出",
+                Ui.ACCENT, new Runnable() {
+                    @Override
+                    public void run() {
+                        openPanel();
+                    }
+                });
+        Ui.infoRow(this, panelCard,
+                "面板跑在微信进程里（长按菜单、步数、批量标签只能在那边操作）。"
+                        + "也可以从微信进：我 → 设置 → 更多 → 关怀模式 → 长按「开启」。", Ui.SUB);
+        root.addView(panelCard);
+
         DailyQuote.load(this, new DailyQuote.Cb() {
             @Override
             public void on(String text, String from, boolean fresh) {
@@ -84,10 +100,41 @@ public class SettingsActivity extends Activity {
         sw(g2, Prefs.K_FIST, "猜拳结果自选", "长按表情面板的猜拳可指定出拳");
         root.addView(g2);
 
+        LinearLayout g5 = Ui.card(this);
+        Ui.section(this, g5, "转发增强", Ui.C_CHAT);
+        sw(g5, Prefs.K_FWD_MENU, "长按菜单加转发入口",
+                "不改微信任何判定，只在长按菜单里多一项「转发（乐信）」");
+        sw(g5, Prefs.K_FWD_SELECT, "解除多选上限", "放宽多选消息的数量限制");
+        Ui.infoRow(this, g5, "原则：不伪造消息、不经手上传，只放行或调用微信自己的链路。", Ui.SUB);
+        root.addView(g5);
+
+        LinearLayout g6 = Ui.card(this);
+        Ui.section(this, g6, "语音 · 底栏 · 标签", Ui.C_PLAY);
+        sw(g6, Prefs.K_VOICE_TEXT, "自动语音转文字",
+                "收到语音自动调微信官方转文字（不接第三方识别）");
+        sw(g6, Prefs.K_FLOAT_FOOTER, "悬浮聊天底栏", "聊天输入栏改成悬浮卡片（圆角 + 阴影 + 侧边距）");
+        sw(g6, Prefs.K_HOME_FLOAT_TAB, "主页悬浮底栏", "主页底部 TabBar 改成悬浮圆角卡片");
+        sw(g6, Prefs.K_BATCH_LABEL, "批量分类标签", "给多个好友批量打标签（走微信官方接口）");
+        Ui.infoRow(this, g6, "批量打标签的「选标签 → 选好友」流程在微信面板里操作"
+                + "（App 进程调不到微信的接口）。", Ui.SUB);
+        root.addView(g6);
+
         LinearLayout g4 = Ui.card(this);
         Ui.section(this, g4, "系统与隐私", Ui.C_LOCAL);
         sw(g4, Prefs.K_SCAN, "解除扫码限制", "相册、长按图片识别二维码不再受限");
         sw(g4, Steps.K_ON, "运动步数修改", "传感器层改写步数，微信侧无改动；当前：" + Steps.label());
+        Ui.actionRow(this, g4, "诊断日志",
+                (Storage.diag() ? "已开启" : "已关闭") + "（改完要重进微信才生效）",
+                Ui.OK, new Runnable() {
+                    @Override
+                    public void run() {
+                        boolean on = !Storage.diag();
+                        Storage.setOn(Storage.K_DIAG, on);
+                        Log.setRuntime(on);
+                        toast(on ? "诊断日志已打开：复现一次问题后到 LSPosed 日志里看"
+                                : "诊断日志已关闭（发布版默认不写任何日志）");
+                    }
+                });
         root.addView(g4);
 
         LinearLayout g3 = Ui.card(this);
@@ -113,11 +160,24 @@ public class SettingsActivity extends Activity {
         Ui.section(this, st, "适配状态", Ui.OK);
         Map<String, Boolean> all = Status.all();
         if (all.isEmpty()) {
-            Ui.infoRow(this, st, "模块尚未在微信里加载，重启微信后再看。", Ui.SUB);
+            // 跨进程：面板在模块 App 进程里，Status 是微信进程的内存 Map。
+            // 读微信进程推上来的状态镜像（BgProvider.call 写的 status.txt）。
+            String pushed = BgProvider.readStatus(this);
+            if (pushed != null && !pushed.isEmpty()) {
+                for (String line : pushed.split("\n")) {
+                    int eq = line.lastIndexOf('=');
+                    if (eq <= 0) continue;
+                    all.put(line.substring(0, eq), "1".equals(line.substring(eq + 1)));
+                }
+            }
         }
-        for (Map.Entry<String, Boolean> e : all.entrySet()) {
-            st.addView(Ui.statusLine(this, e.getValue(), e.getKey(),
-                    e.getValue() ? "已生效" : "未适配（自动跳过）"));
+        if (all.isEmpty()) {
+            Ui.infoRow(this, st, "还没有状态：进微信一次让它装上，然后回这里看。", Ui.SUB);
+        } else {
+            for (Map.Entry<String, Boolean> e : all.entrySet()) {
+                st.addView(Ui.statusLine(this, e.getValue(), e.getKey(),
+                        e.getValue() ? "已生效" : "未适配（自动跳过）"));
+            }
         }
         root.addView(st);
 
@@ -136,11 +196,32 @@ public class SettingsActivity extends Activity {
         });
     }
 
+    /** 让微信进程把悬浮面板打开（发广播过去，切回微信就能看到）。 */
+    private void openPanel() {
+        try {
+            android.content.Intent i = new android.content.Intent(Bridge.ACTION);
+            i.setPackage(Entry.HOST);
+            i.putExtra("open_from", System.currentTimeMillis());
+            sendBroadcast(i);
+            toast("已发送，切回微信即可看到面板");
+        } catch (Throwable t) {
+            toast("发送失败：请从微信里长按关怀模式「开启」进入");
+        }
+    }
+
+    private void toast(String s) {
+        try {
+            android.widget.Toast.makeText(this, s, android.widget.Toast.LENGTH_SHORT).show();
+        } catch (Throwable ignored) {
+            // 忽略
+        }
+    }
+
     private String version() {
         try {
             return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
         } catch (Throwable t) {
-            return "1.1";
+            return Features.MODULE_VERSION;
         }
     }
 }

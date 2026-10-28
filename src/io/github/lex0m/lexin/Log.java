@@ -5,8 +5,8 @@ import de.robv.android.xposed.XposedBridge;
 /** 日志：发布版静默。写出去的每一行都会落进宿主的模块日志，等于留痕迹。 */
 final class Log {
 
-    /** Set true only for a throwaway verification build. */
-    private static final boolean DEBUG = false;
+    /** 由 build.sh 按 --debug 生成（见 BuildFlags），正式包恒为 false。 */
+    private static final boolean DEBUG = BuildFlags.DEBUG;
 
     /**
      * 运行时开关：面板里可以打开（排查现场问题用）。
@@ -20,6 +20,16 @@ final class Log {
 
     static boolean runtimeOn() {
         return DEBUG || runtime;
+    }
+
+    /** App 进程用（那里没有 XposedBridge）：只在 DEBUG 构建里输出。 */
+    static void a(String msg) {
+        if (!DEBUG && !runtime) return;
+        try {
+            android.util.Log.i("lexin", msg);
+        } catch (Throwable ignored) {
+            // 日志永不抛异常
+        }
     }
 
     /** Emits only when DEBUG is on（或用户临时打开了运行时日志）. */

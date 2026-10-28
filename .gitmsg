@@ -1,7 +1,25 @@
-默认零日志 + 安卓15~17 加载加固
+v1.4.0：两轮兼容性优化（功能兼容 + 设备/系统兼容）
 
-- Log 默认关闭：发布版一个字都不写；面板「诊断信息」里可开（持久化，重启微信后生效）
-- Entry.alive 加载埋点改为受开关控制（默认不写）
-- Assets：zygote 阶段零反射（不再调隐藏 API），资源读取优先公开 API（zip 直读模块 APK），隐藏 API 只做兜底
-- 面板新增「诊断信息」行：资源路径 · 锚点表版本 · 日志开关
-- 新增《装机操作单.md》：给不会折腾的用户，一次到底的装机步骤
+功能兼容
+- 入口跳板改为直接打开设置页；外观页补「‹ 返回设置」出口
+  （之前桌面图标只发广播就退出，微信不在前台等于没反应，看起来像"只有界面美化"）
+- 设置页补齐到与微信面板同一套：转发增强、语音·底栏·标签、诊断日志、面板入口
+- 设置页开关真正生效：改动导出成 push.txt，微信进程启动按 ts 水位合并进它自己那份
+  （原来两边各读自己的 prefs，设置页改的开关微信读不到）
+- 外观页选的背景图跨进程生效（Beautify 缺图时经 BgProvider 拉取）
+- 转发增强触摸热路径：先判 ACTION_UP 再查父级文字
+
+设备 / 系统兼容
+- targetSdk 35 在 Android 15 强制 edge-to-edge：补底部系统栏高度
+- 深色模式 force dark 反转浅色界面：设置页 / 外观页 / 微信面板三处关掉
+- 微信 targetSdk 34 无 MANAGE_EXTERNAL_STORAGE，Android 11+ 写不了 /sdcard/Download：
+  导出改三层兜底（公共目录探针 → 微信外部私有目录 → 私有 files）+ MediaStore 补一份
+- 微信沙箱进程（:xweb_* / :sandboxed_process / :warmup）跳过；面板广播、状态推送、
+  dex 扫描只在主进程
+- 版本号单源：Features.MODULE_VERSION 由 build.sh 从 AndroidManifest 生成
+- BgProvider 写操作校验调用方；修掉 /config 请求误删背景图
+
+其它
+- dist/lexin.apk 更新为 1.4.0（653,526 B，sha256 e9ec9e0b…）
+- 新增 更新说明-v1.4.0.md；VERSIONS.md 追加 v1.4.0 章节
+- README：版本徽章、面板入口说明、功能表补齐 v1.3 起的转发/语音/底栏/标签、加更新日志

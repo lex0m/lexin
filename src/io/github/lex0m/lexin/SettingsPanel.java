@@ -87,6 +87,7 @@ final class SettingsPanel {
         if (w != null) {
             w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
             w.setBackgroundDrawable(new ColorDrawable(Ui.BG));
+            Ui.noForceDark(w);          // 深色模式下别把浅色面板强制反转
         }
 
         ScrollView scroll = new ScrollView(host);
@@ -314,6 +315,38 @@ final class SettingsPanel {
                 + "倍率按真实步数放大，自动增加按小时往上抬，直接增加是把 N 步一次性加上去"
                 + "（加完就撒手，真实步数照常累加，不会把数字钉死）；都受上限约束。", Ui.SUB);
         root.addView(g6);
+
+        // ── 转发增强 ──
+        LinearLayout g7 = Ui.card(host);
+        Ui.section(host, g7, "转发增强", Ui.C_CHAT);
+        addSwitch(host, g7, Prefs.K_FWD_MENU, "长按菜单加转发入口",
+                "不改微信任何判定，只在长按菜单里加一项「" + "转发（乐信）" + "」", Ui.C_CHAT);
+        addSwitch(host, g7, Prefs.K_FWD_SELECT, "解除多选上限",
+                "放宽多选消息的数量限制", Ui.C_CHAT);
+        Ui.infoRow(host, g7, "原则：不伪造消息、不经手上传，只放行或调用微信自己的链路；"
+                + "新功能默认关闭，确认没问题再开。", Ui.SUB);
+        root.addView(g7);
+
+        // ── v1.3 新功能 ──
+        LinearLayout g8 = Ui.card(host);
+        Ui.section(host, g8, "语音 · 底栏 · 标签", Ui.C_CHAT);
+        addSwitch(host, g8, Prefs.K_VOICE_TEXT, "自动语音转文字",
+                "收到语音自动调微信官方转文字（不接第三方识别）", Ui.C_CHAT);
+        addSwitch(host, g8, Prefs.K_FLOAT_FOOTER, "悬浮聊天底栏",
+                "聊天输入栏改成悬浮卡片（圆角 + 阴影 + 侧边距）", Ui.C_CHAT);
+        addSwitch(host, g8, Prefs.K_HOME_FLOAT_TAB, "主页悬浮底栏",
+                "主页底部 TabBar 改成悬浮圆角卡片（仿 TG）", Ui.C_CHAT);
+        addSwitch(host, g8, Prefs.K_BATCH_LABEL, "批量分类标签",
+                "给多个好友批量打标签（走微信官方接口）", Ui.C_CHAT);
+        addAction(host, g8, "批量打标签", "选标签 → 选好友 → 应用", Ui.C_CHAT, new Runnable() {
+            @Override
+            public void run() {
+                batchLabelFlow(host);
+            }
+        });
+        Ui.infoRow(host, g8, "自动语音转文字 = 收到语音后微信自己转文字（同长按 → 转文字）；"
+                + "批量标签复用微信官方 netscene，服务器侧与你手动打标签完全一致。", Ui.SUB);
+        root.addView(g8);
 
         // ── 外观 ──
         LinearLayout g4 = Ui.card(host);
@@ -665,6 +698,142 @@ final class SettingsPanel {
         }
     }
 
+    // ── v1.3 批量打标签流程 ─────────────────────────────────────────────────
+
+    private static void batchLabelFlow(final Activity host) {
+        if (!Prefs.onDefault(Prefs.K_BATCH_LABEL)) {
+            toast(host, "请先打开「批量分类标签」开关");
+            return;
+        }
+        final java.util.List<String[]> labels = BatchLabel.getAllLabels();
+        final java.util.List<String[]> friends = BatchLabel.getFriends();
+        if (friends.isEmpty()) {
+            toast(host, "没读到好友（微信数据库还没就绪，稍后再试）");
+            return;
+        }
+        final int n = labels.size();
+        final String[] labelNames = new String[n + 1];
+        for (int i = 0; i < n; i++) labelNames[i] = labels.get(i)[1];
+        labelNames[n] = "＋ 新建标签";
+
+        choose(host, "选择要打的标签", labelNames, 0, new Pick() {
+            @Override
+            public void on(int index) {
+                if (index == n) {
+                    askNewLabel(host, friends);
+                } else {
+                    pickFriends(host, labels.get(index)[1], friends);
+                }
+            }
+        });
+    }
+
+    private static void askNewLabel(final Activity host, final java.util.List<String[]> friends) {
+        try {
+            final android.widget.EditText in = new android.widget.EditText(host);
+            in.setHint("标签名");
+            in.setSingleLine(true);
+            LinearLayout box = Ui.column(host);
+            int pad = Ui.dp(host, 16);
+            box.setPadding(pad, pad, pad, pad);
+            box.addView(in);
+            new android.app.AlertDialog.Builder(host)
+                    .setTitle("新建标签")
+                    .setView(box)
+                    .setPositiveButton("下一步", new DialogInterface.OnClickListener() {
+                        @Override
+                        public void onClick(DialogInterface d, int which) {
+                            String name = in.getText() == null ? "" : in.getText().toString().trim();
+                            if (name.isEmpty()) {
+                                toast(host, "标签名不能为空");
+                                return;
+                            }
+                            pickFriends(host, name, friends);
+                        }
+                    })
+                    .setNegativeButton("取消", null)
+                    .show();
+        } catch (Throwable ignored) {
+            toast(host, "设置失败");
+        }
+    }
+
+    private static void pickFriends(final Activity host, final String labelName,
+                                    final java.util.List<String[]> friends) {
+        try {
+            final int m = friends.size();
+            final String[] names = new String[m];
+            for (int i = 0; i < m; i++) names[i] = friends.get(i)[1];
+            final boolean[] checked = new boolean[m];
+            new android.app.AlertDialog.Builder(host)
+                    .setTitle("给「" + labelName + "」选好友（" + m + "）")
+                    .setMultiChoiceItems(names, checked, new DialogInterface.OnMultiChoiceClickListener() {
+                        @Override
+                        public void onClick(DialogInterface d, int which, boolean isChecked) {
+                            checked[which] = isChecked;
+                        }
+                    })
+                    .setPositiveButton("应用", new DialogInterface.OnClickListener() {
+                        @Override
+                        public void onClick(DialogInterface d, int which) {
+                            applyLabels(host, labelName, friends, checked);
+                        }
+                    })
+                    .setNegativeButton("取消", null)
+                    .show();
+        } catch (Throwable ignored) {
+            toast(host, "设置失败");
+        }
+    }
+
+    private static void applyLabels(final Activity host, final String labelName,
+                                    final java.util.List<String[]> friends, final boolean[] checked) {
+        int sel = 0;
+        for (boolean b : checked) if (b) sel++;
+        if (sel == 0) {
+            toast(host, "没选中好友");
+            return;
+        }
+        final int total = sel;
+        toast(host, "开始为 " + total + " 个好友打标签，稍候…");
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    // 先确保标签存在（存在直接返回 id，不存在走官方 netscene 新建）
+                    Integer id = BatchLabel.createLabel(labelName);
+                    if (id == null) {
+                        toastMain(host, "标签「" + labelName + "」创建失败，稍后再试");
+                        return;
+                    }
+                    int ok = 0;
+                    for (int i = 0; i < friends.size(); i++) {
+                        if (!checked[i]) continue;
+                        if (BatchLabel.addLabel(friends.get(i)[0], labelName)) ok++;
+                        try { Thread.sleep(500); } catch (Throwable ignored) { }
+                    }
+                    final int done = ok;
+                    toastMain(host, "已为 " + done + "/" + total + " 个好友打上「" + labelName + "」");
+                } catch (Throwable t) {
+                    toastMain(host, "批量打标签失败：" + t.getClass().getSimpleName());
+                }
+            }
+        }, "bl-" + Integer.toHexString((int) (System.nanoTime() & 0xFFF))).start();
+    }
+
+    private static void toastMain(final Activity host, final String s) {
+        try {
+            host.runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    toast(host, s);
+                }
+            });
+        } catch (Throwable ignored) {
+            // 宿主已销毁就不提示
+        }
+    }
+
     /**
      * 直接增加的步数：不给档位，自己填。只做范围判断，上限就是「额外步数上限」那个值
      * （一开始配好的那个上限，别让填进去的数反过来超了它）。
@@ -864,8 +1033,8 @@ final class SettingsPanel {
         }
     }
 
-    /** 取不到包信息时的兜底（与 AndroidManifest 的 versionName 保持一致）。 */
-    private static final String MODULE_VERSION = "1.1";
+    /** 取不到包信息时的兜底（与 AndroidManifest 的 versionName 保持一致，单一来源 = Features）。 */
+    private static final String MODULE_VERSION = Features.MODULE_VERSION;
 
     private static void toast(Context ctx, String s) {
         try {

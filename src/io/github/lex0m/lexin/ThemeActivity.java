@@ -33,6 +33,7 @@ public class ThemeActivity extends Activity {
     @Override
     protected void onCreate(Bundle saved) {
         super.onCreate(saved);
+        Ui.noForceDark(this);          // 深色模式下别把浅色界面强制反转
         Storage.init(getApplicationContext());
         if (Storage.num("disc_v", 0) < 1) {
             // 与面板同一套免责声明：首次打开先读完再进界面
@@ -55,9 +56,10 @@ public class ThemeActivity extends Activity {
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(18), dp(22) + statusBarPx(), dp(18), dp(28));
+        root.setPadding(dp(18), dp(22) + statusBarPx(), dp(18), dp(28) + Ui.navBarPx(this));
         scroll.addView(root);
 
+        root.addView(backBar());
         root.addView(title("界面美化"));
         root.addView(note("全部只在本机渲染，改完重进界面即可看到效果。"));
 
@@ -215,8 +217,36 @@ public class ThemeActivity extends Activity {
 
     // ── view factories ───────────────────────────────────────────────────────
 
-    private TextView title(String text) {
+    /**
+     * 顶部返回条。
+     *
+     * 这一页只是「外观」二级页，全部功能在主设置页（SettingsActivity）和微信面板里。
+     * 老版本这里没出口，进去的人会以为模块只有美化功能 ⇒ 给一条明确的路回去。
+     */
+    private android.view.View backBar() {
         TextView tv = new TextView(this);
+        tv.setText("‹ 返回设置 · 全部功能");
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f);
+        tv.setTextColor(Color.parseColor("#4A6CF7"));
+        tv.setPadding(dp(4), 0, 0, dp(10));
+        tv.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                try {
+                    android.content.Intent i = new android.content.Intent();
+                    i.setClassName(getPackageName(), "io.github.lex0m.lexin.SettingsActivity");
+                    i.addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                    startActivity(i);
+                } catch (Throwable ignored) {
+                    // 打不开就只是退出本页
+                }
+                finish();
+            }
+        });
+        return tv;
+    }
+
+    private TextView title(String text) {        TextView tv = new TextView(this);
         tv.setText(text);
         tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f);
         tv.setTextColor(Color.parseColor("#1C1C1E"));

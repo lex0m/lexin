@@ -120,10 +120,14 @@ final class ImagePicker {
                 return;
             }
 
-            // 面板跑在微信进程里，所以选中的图直接放进该进程自己的私有目录
+            // 面板跑在微信进程里 → 直接放进该进程自己的私有目录（宿主侧原样可读）。
+            // 设置页跑在模块进程里 → 放进 BgProvider 那份，宿主侧通过 content:// 拉取
+            // （Beautify.pullBackground）。老版本两边各写各的，设置页选的图永远不生效。
             String targetFile = Beautify.K_CARD_IMG.equals(which)
                     ? Beautify.CARD_FILE : Beautify.BG_FILE;
-            java.io.File out = new java.io.File(host.getFilesDir(), targetFile);
+            boolean viaProvider = !Storage.isHostSide() && !Beautify.K_CARD_IMG.equals(which);
+            java.io.File out = viaProvider ? BgProvider.file(host)
+                    : new java.io.File(host.getFilesDir(), targetFile);
             java.io.FileOutputStream fos = new java.io.FileOutputStream(out, false);
             byte[] buf = new byte[16384];
             int n;

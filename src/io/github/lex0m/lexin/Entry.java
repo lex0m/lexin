@@ -48,9 +48,28 @@ public final class Entry implements IXposedHookLoadPackage, IXposedHookZygoteIni
         }
     }
 
+    /**
+     * 这些微信子进程里装 hook 没有意义，但会重复跑一遍「抓 dex / 装十几个功能」，
+     * 白耗启动时间和电量（微信冷启时会同时拉起下面这些进程）：
+     *   :xweb_*               内置浏览器的沙箱进程（只跑网页，没有微信界面）
+     *   :sandboxed_process*   小程序 / 网页沙箱
+     *   :warmup               预热空进程
+     * 其余进程（主进程 / :push / :appbrand0、1 / :tools 等）照旧装 —— 去广告的小程序
+     * 开屏拦截就在 :appbrand 里，不能一刀切。
+     */
+    private static boolean skipProcess(String processName) {
+        if (processName == null) return false;          // 老框架拿不到进程名：维持原行为
+        int i = processName.indexOf(':');
+        if (i < 0) return false;                        // 主进程
+        String sub = processName.substring(i + 1);
+        return sub.startsWith("xweb") || sub.startsWith("sandboxed_process")
+                || sub.startsWith("warmup");
+    }
+
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
         if (!HOST.equals(lp.packageName)) return;
+        if (skipProcess(lp.processName)) return;
         try {
             XposedHelpers.findAndHookMethod(Application.class, "attach", Context.class,
                     new XC_MethodHook() {

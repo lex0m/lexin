@@ -48,6 +48,14 @@ final class Storage {
     static final String K_SCAN = "scan_free";
     /** 诊断日志开关（默认关：发布版一个字都不写）。 */
     static final String K_DIAG = "diag_log";
+    /** v1.3 自动语音转文字（默认关：调微信官方转文字，联网识别）。 */
+    static final String K_VOICE_TEXT = "voice_text";
+    /** v1.3 悬浮聊天底栏（默认关：改输入栏外观）。 */
+    static final String K_FLOAT_FOOTER = "float_footer";
+    /** v1.3 批量分类标签（默认关：走微信官方 netscene 改标签）。 */
+    static final String K_BATCH_LABEL = "batch_label";
+    /** v1.3.1 主页悬浮底栏（默认关：改主页 TabBar 外观）。 */
+    static final String K_HOME_FLOAT_TAB = "home_float_tab";
 
     // ── init ─────────────────────────────────────────────────────────────────
 
@@ -64,7 +72,10 @@ final class Storage {
                     hostSide = Entry.HOST.equals(pkg);
                     String file = hostSide ? HOST_FILE : FILE;
                     sp = ctx.getSharedPreferences(file, Context.MODE_PRIVATE);
-                    if (hostSide) migrateLegacy(ctx);
+                    if (hostSide) {
+                        migrateLegacy(ctx);
+                        importFromHost(ctx);       // 合并设置页那边的改动（按 ts 水位，只合新的一次）
+                    }
                 } catch (Throwable ignored) {
                     // 没有可写存储
                 }
@@ -159,6 +170,7 @@ final class Storage {
         } catch (Throwable ignored) {
             // 忽略
         }
+        exportForHost();
     }
 
     static String str(String key, String def) {
@@ -185,6 +197,7 @@ final class Storage {
         } catch (Throwable ignored) {
             // 忽略
         }
+        exportForHost();
     }
 
     static int num(String key, int def) {
@@ -207,6 +220,7 @@ final class Storage {
         } catch (Throwable ignored) {
             // 忽略
         }
+        exportForHost();
     }
 
     /** 诊断日志是否开启（持久化，供下次加载时判断）。 */
@@ -227,10 +241,148 @@ final class Storage {
     /** 诊断：当前在哪一侧、用的是哪个文件。 */
     static String side() {
         return "sp=" + (sp != null) + " xsp=" + (xsp != null) + " host=" + hostSide;
+    }    static boolean isHostSide() {
+        return hostSide;
     }
 
-    static boolean isHostSide() {
-        return hostSide;
+    // ── 设置页 ⇄ 宿主 的配置同步 ────────────────────────────────────────────
+    //
+    // 两边写的不是同一个文件：
+    //   模块进程（设置页）→ 自己的 svc.xml
+    //   微信进程（宿主）  → 微信的 com.tencent.mm_preferences
+    // 读的时候又都先读自己那份，所以**设置页里改的开关，微信侧根本读不到**
+    // （表现就是"开关点了没反应"，只有微信面板里改的才生效）。
+    //
+    // 解决：设置页每次改动后，把整份配置导成 push.txt 放在 provider 目录；
+    // 宿主进程启动时通过 provider 拉一次，按 ts 水位合并进它自己那份。
+
+    /** 上次合并进宿主的推送时间戳（物理键，Long）。 */
+    private static final String K_PUSH_TS = "__push_ts";
+
+    /** 设置页侧：把当前配置整份导出（宿主启动时来拉）。 */
+    private static void exportForHost() {
+        if (hostSide || sp == null || appCtx == null) return;
+        try {
+            Map<String, ?> all = sp.getAll();
+            StringBuilder sb = new StringBuilder(all.size() * 24 + 32);
+            sb.append("ts=").append(System.currentTimeMillis()).append('\n');
+            for (Map.Entry<String, ?> en : all.entrySet()) {
+                String k = en.getKey();
+                if (k == null || !k.startsWith(PREFIX)) continue;   // 只导逻辑配置，不导内部键
+                Object v = en.getValue();
+                if (v instanceof Boolean) {
+                    sb.append("b:").append(k).append('=').append(((Boolean) v) ? 1 : 0).append('\n');
+                } else if (v instanceof Integer) {
+                    sb.append("i:").append(k).append('=').append(v).append('\n');
+                } else if (v instanceof String) {
+                    sb.append("s:").append(k).append('=').append(escape((String) v)).append('\n');
+                }
+            }
+            java.io.File f = new java.io.File(appCtx.getFilesDir(), BgProvider.PUSH_FILE);
+            java.io.FileOutputStream os = new java.io.FileOutputStream(f, false);
+            try {
+                os.write(sb.toString().getBytes("UTF-8"));
+            } finally {
+                try { os.close(); } catch (Throwable ignored) { }
+            }
+        } catch (Throwable ignored) {
+            // 推送失败不影响本地设置
+        }
+    }
+
+    /** 宿主侧：启动时拉一次设置页的推送，按 ts 水位合并。 */
+    private static void importFromHost(Context ctx) {
+        if (sp == null) return;
+        try {
+            android.net.Uri u = android.net.Uri.parse(
+                    "content://" + BgProvider.AUTHORITY + BgProvider.PUSH_PATH);
+            java.io.InputStream in = ctx.getContentResolver().openInputStream(u);
+            if (in == null) return;
+            java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream(4096);
+            try {
+                byte[] buf = new byte[4096];
+                int n;
+                while ((n = in.read(buf)) > 0 && bo.size() < 128 * 1024) bo.write(buf, 0, n);
+            } finally {
+                try { in.close(); } catch (Throwable ignored) { }
+            }
+            String text = new String(bo.toByteArray(), "UTF-8");
+            String[] lines = text.split("\n");
+            if (lines.length == 0) return;
+
+            long ts = 0L;
+            long applied = 0L;
+            try {
+                applied = sp.getLong(physical(K_PUSH_TS), 0L);
+            } catch (Throwable ignored) {
+                // 类型不符就当没合并过
+            }
+            for (String line : lines) {
+                if (line.startsWith("ts=")) {
+                    try {
+                        ts = Long.parseLong(line.substring(3).trim());
+                    } catch (Throwable ignored) {
+                        ts = 0L;
+                    }
+                    break;
+                }
+            }
+            if (ts <= 0L || ts <= applied) return;      // 没有新东西
+
+            SharedPreferences.Editor e = sp.edit();
+            for (String line : lines) {
+                if (line.length() < 4 || line.startsWith("ts=")) continue;
+                char type = line.charAt(0);
+                if (line.charAt(1) != ':') continue;
+                int eq = line.indexOf('=', 2);
+                if (eq <= 2) continue;
+                String key = line.substring(2, eq);
+                String val = line.substring(eq + 1);
+                try {
+                    if (type == 'b') e.putBoolean(key, "1".equals(val));
+                    else if (type == 'i') e.putInt(key, Integer.parseInt(val));
+                    else if (type == 's') e.putString(key, unescape(val));
+                } catch (Throwable ignored) {
+                    // 单条坏行跳过
+                }
+            }
+            e.putLong(physical(K_PUSH_TS), ts);
+            e.apply();
+            log("imported push ts=" + ts);
+        } catch (Throwable t) {
+            // provider 没起来 / 文件不存在：正常，下次进微信再拉
+            log("import skipped: " + t.getClass().getSimpleName());
+        }
+    }
+
+    private static String escape(String s) {
+        if (s == null) return "";
+        StringBuilder sb = new StringBuilder(s.length() + 8);
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '\\') sb.append("\\\\");
+            else if (c == '\n') sb.append("\\n");
+            else if (c == '\r') sb.append("\\r");
+            else sb.append(c);
+        }
+        return sb.toString();
+    }
+
+    private static String unescape(String s) {
+        if (s == null) return "";
+        StringBuilder sb = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '\\' && i + 1 < s.length()) {
+                char n = s.charAt(++i);
+                if (n == 'n') sb.append('\n');
+                else if (n == 'r') sb.append('\r');
+                else sb.append(n);
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
     }
 
     private static void log(String s) {
