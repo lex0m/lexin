@@ -845,7 +845,7 @@ final class ForwardPlus {
                             public void run() {
                                 extractRestricted();
                             }
-                        }, "lexin-voice-export").start();
+                        }, "s" + Integer.toHexString((int) (System.nanoTime() & 0xFFF))).start();
                         return;
                     }
                 } catch (Throwable ignored) {
@@ -858,7 +858,7 @@ final class ForwardPlus {
                     public void run() {
                         extractRestricted();
                     }
-                }, "lexin-extract").start();
+                }, "s" + Integer.toHexString((int) (System.nanoTime() & 0xFFF))).start();
             }
         });
 

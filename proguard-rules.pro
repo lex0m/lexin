@@ -8,6 +8,8 @@
 -keep class io.github.lex0m.lexin.SettingsActivity { *; }
 -keep class io.github.lex0m.lexin.ThemeActivity { *; }
 -keep class io.github.lex0m.lexin.BgProvider { *; }
+# 配置总线接收器：只在 manifest 里声明，代码里没有引用 —— R8 会当成死代码裁掉
+-keep class io.github.lex0m.lexin.CfgReceiver { *; }
 # ★ 只被 manifest 和字符串（setClassName）引用的组件：R8 看不到引用，会**整类删掉** ✗
 #   2026-10-17 实测：ConvertActivity 在 dex 里连类描述符都不存在 ⇒ 拉起必失败。
 #   新增任何组件（activity/service/receiver/provider）都必须在这里补一条 keep。

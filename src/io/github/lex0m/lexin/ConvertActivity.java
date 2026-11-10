@@ -51,6 +51,7 @@ public class ConvertActivity extends Activity {
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
+        if (!Ui.launchedByTrusted(this)) { finish(); return; }   // 第三方塞 silk 进不来
         Intent it = getIntent();
         final byte[] bytes = it == null ? null : it.getByteArrayExtra("silk_bytes");
         final String path = it == null ? null : it.getStringExtra("silk");

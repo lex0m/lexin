@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="io.github.lex0m.lexin"
-    android:versionCode="26"
-    android:versionName="1.4.0">
+    android:versionCode="27"
+    android:versionName="1.5.0">
 
     <uses-sdk android:minSdkVersion="28" android:targetSdkVersion="35" />
 
@@ -58,6 +58,17 @@
              module's private dir (invisible to WeChat); this provider is the only
              way the host process can read it without us writing into WeChat's own
              storage. It exposes exactly one file and nothing else. -->
+        <!-- 配置总线：微信进程 ⇄ 模块进程的唯一通道（provider 被包可见性封死，只能走广播）。
+             只认两条短 action，别的什么都不做；exported 是必须的（发送方是微信，另一个 uid）。 -->
+        <receiver
+            android:name=".CfgReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="x.q" />
+                <action android:name="x.p" />
+            </intent-filter>
+        </receiver>
+
         <provider
             android:name=".BgProvider"
             android:authorities="io.github.lex0m.lexin.bg"
@@ -75,7 +86,7 @@
         <!-- Appearance screen: second level, reached from the main menu. -->
         <activity
             android:name=".ThemeActivity"
-            android:exported="true"
+            android:exported="false"
             android:label="@string/app_name"
             android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar" />
 

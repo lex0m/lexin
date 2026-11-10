@@ -22,6 +22,27 @@ import android.widget.TextView;
  */
 final class Ui {
 
+    /**
+     * 组件被谁拉起的：只认「本模块自己」和「微信」，其余直接拒。
+     *
+     * 为什么要这个而不是 android:exported="false"：SettingsActivity / ConvertActivity 是
+     * 微信进程拉起的（跨 uid），关掉导出功能就断；所以保留导出、在入口卡 uid。
+     * 拿不到 launchedFromUid 时（同进程启动/系统拉起）放行，避免把正常路径锁死。
+     */
+    static boolean launchedByTrusted(android.app.Activity a) {
+        try {
+            if (a == null) return false;
+            int uid = a.getLaunchedFromUid();
+            if (uid < 0) return true;
+            if (uid == android.os.Process.myUid()) return true;
+            int host = a.getPackageManager().getPackageUid(Entry.HOST, 0);
+            return uid == host;
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+
     // ── 配色 ────────────────────────────────────────────────────────────────
 
     static final int BG = 0xFFF3F4F7;

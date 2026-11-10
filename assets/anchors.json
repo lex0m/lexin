@@ -3,16 +3,21 @@
  "schema": 1,
  "slots": {
   "ad_appbrand": {
-   "method": "K2(*):boolean",
+   "emitMethod": "checkCanShowAd, ",
+   "note": "开屏广告判定（checkCanShowAd）：8.0.80 = g7#N2；旧版是 #K2",
    "pkg": "com.tencent.mm.plugin.appbrand",
    "scan": true,
-   "simple": "^[a-z0-9]{1,3}$"
+   "simple": "^[a-zA-Z0-9_$]{1,3}$",
+   "strings": [
+    "checkCanShowAd, "
+   ]
   },
   "ad_open": {
    "method": "a(com.tencent.mm.plugin.appbrand.config.AppBrandInitConfigWC):boolean",
    "pkg": "",
    "scan": false,
    "seed": [
+    "vc1.j",
     "lc1.j"
    ],
    "simple": "^[a-z0-9]{1,4}$"
@@ -66,6 +71,7 @@
    "pkg": "",
    "scan": false,
    "seed": [
+    "go.b",
     "xl5.g"
    ],
    "simple": "^[a-z0-9]{1,4}$"
@@ -124,6 +130,16 @@
     "[notifyDataSetChange]"
    ]
   },
+  "client_check": {
+   "emitMethod": ".sysmsg.ClientCheckHook.clientcheck.seq",
+   "note": "sysmsg 分派（ClientCheck* 探测）：8.0.80 = w41.u#j7",
+   "pkg": "",
+   "scan": false,
+   "simple": "^.+$",
+   "strings": [
+    ".sysmsg.ClientCheckHook.clientcheck.seq"
+   ]
+  },
   "core_storage": {
    "note": "核心存储（拿进程内已打开的微信数据库）",
    "pkg": "",
@@ -146,6 +162,17 @@
   "gallery": {
    "exact": "com.tencent.mm.ui.chatting.gallery.ImageGalleryUI",
    "scan": false
+  },
+  "matrix_hookcheck": {
+   "emitMethod": "#checkHook hooking",
+   "note": "Matrix checkHook（native 自查）：8.0.80 = pv0.u0#a",
+   "pkg": "",
+   "scan": false,
+   "simple": "^.+$",
+   "strings": [
+    "#checkHook hooking",
+    "matrix-signaledhook"
+   ]
   },
   "mm_kernel": {
    "note": "MMKernel（拿 netSceneQueue / coreStorage）",
@@ -279,6 +306,16 @@
    "strings": [
     "MicroMsg.TransformComponent",
     "[onChattingPause]"
+   ]
+  },
+  "xposed_check": {
+   "emitMethod": "de.robv.android.xposed.XposedBridge",
+   "note": "栈帧检测（TinkerCrashProtect）：8.0.80 = com.tencent.mm.app.j3#a",
+   "pkg": "",
+   "scan": false,
+   "simple": "^.+$",
+   "strings": [
+    "de.robv.android.xposed.XposedBridge"
    ]
   }
  },
@@ -710,6 +747,69 @@
     "sqlite_db_wrapper": "ii5.b0",
     "sysmsg_parser": "com.tencent.mm.sdk.platformtools.da",
     "transform_component": "com.tencent.mm.ui.chatting.component.hp"
+   }
+  },
+  "8.0.80": {
+   "code": 3220,
+   "slots": {
+    "ad_appbrand": "com.tencent.mm.plugin.appbrand.g7#N2",
+    "ad_open": "gd1.j",
+    "add_contact_label": "dh3.a",
+    "api_manager": "com.tencent.mm.ui.chatting.manager.c",
+    "care_mode": "com.tencent.mm.plugin.setting.ui.setting.SettingsCareModeIntro",
+    "chat_adapter": "com.tencent.mm.ui.chatting.adapter.k",
+    "chat_bind_mvvm": "nm5.g#h",
+    "chat_binder": "jo.b",
+    "chat_footer": "com.tencent.mm.pluginsdk.ui.chat.ChatFooter",
+    "chat_menu": [
+     "com.tencent.mm.ui.chatting.component.u5",
+     "com.tencent.mm.ui.chatting.e0",
+     "com.tencent.mm.ui.chatting.view.BubbleCornorLayout",
+     "com.tencent.mm.ui.chatting.viewitems.x1",
+     "com.tencent.mm.ui.chatting.wc",
+     "com.tencent.mm.ui.chatting.yc"
+    ],
+    "chat_menu_select": [
+     "com.tencent.mm.ui.chatting.bd",
+     "com.tencent.mm.ui.chatting.cd",
+     "com.tencent.mm.ui.chatting.component.j",
+     "com.tencent.mm.ui.chatting.component.v5",
+     "com.tencent.mm.ui.chatting.component.wb",
+     "com.tencent.mm.ui.chatting.ed",
+     "com.tencent.mm.ui.chatting.f0",
+     "com.tencent.mm.ui.chatting.presenter.o1",
+     "com.tencent.mm.ui.chatting.qa",
+     "com.tencent.mm.ui.chatting.search.multi.fragment.FTSMultiNormalResultFragment",
+     "com.tencent.mm.ui.chatting.t",
+     "com.tencent.mm.ui.chatting.va",
+     "com.tencent.mm.ui.chatting.viewitems.x1",
+     "com.tencent.mm.ui.chatting.viewitems.x4",
+     "com.tencent.mm.ui.chatting.xc"
+    ],
+    "chat_quick_select": "com.tencent.mm.ui.chatting.component.b1",
+    "chatting_adapter_v3": "com.tencent.mm.ui.chatting.adapter.k",
+    "chatting_context": "wk5.d",
+    "client_check": "w41.u#j7",
+    "core_storage": "zp0.b0",
+    "emoji_panel": "yr.p",
+    "gallery": "com.tencent.mm.ui.chatting.gallery.ImageGalleryUI",
+    "matrix_hookcheck": "pv0.u0#a",
+    "mm_kernel": "zp0.j1",
+    "modify_contact_label": "dh3.e",
+    "msg": "com.tencent.mm.storage.f9",
+    "net_scene_queue": "com.tencent.mm.modelbase.s1",
+    "qr_scan": "r84.v",
+    "rng": "com.tencent.mm.sdk.platformtools.b9",
+    "sns_ad": "com.tencent.mm.plugin.sns.storage.ADInfo",
+    "sns_db": "ae.s",
+    "sns_db2": "t93.l",
+    "sport_detector": "com.tencent.mm.plugin.sport.model.g",
+    "sport_push_detector": "com.tencent.mm.plugin.sport.model.m",
+    "sport_util": "com.tencent.mm.plugin.sport.model.c0",
+    "sqlite_db_wrapper": "ai5.d0",
+    "sysmsg_parser": "com.tencent.mm.sdk.platformtools.ja",
+    "transform_component": "com.tencent.mm.ui.chatting.component.gp",
+    "xposed_check": "com.tencent.mm.app.j3#a"
    }
   }
  }

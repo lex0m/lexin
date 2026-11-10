@@ -4,9 +4,9 @@
 
 **微信界面美化 + 本地功能增强** · Xposed / LSPosed 模块
 
-![version](https://img.shields.io/badge/version-1.4.0-4A6CF7?style=flat-square)
+![version](https://img.shields.io/badge/version-1.5.0-4A6CF7?style=flat-square)
 ![platform](https://img.shields.io/badge/Android-12%20~%2016-3DDC84?style=flat-square&logo=android&logoColor=white)
-![wechat](https://img.shields.io/badge/微信-8.0.72%20~%208.0.79-07C160?style=flat-square&logo=wechat&logoColor=white)
+![wechat](https://img.shields.io/badge/微信-8.0.72%20~%208.0.80-07C160?style=flat-square&logo=wechat&logoColor=white)
 ![size](https://img.shields.io/badge/APK-638%20KB-8A8F9A?style=flat-square)
 ![license](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
 
@@ -79,7 +79,7 @@
 
 ## 安装
 
-1. 装 [`lexin-1.4.0.apk`](../../releases)（或本仓库根目录的 APK）
+1. 装 [`lexin-1.5.0.apk`](../../releases)（或本仓库根目录的 APK）
 2. LSPosed 里勾选「乐信」，**作用域只勾微信**
 3. 强行停止微信，重新打开
 
@@ -110,7 +110,8 @@
 
 | 版本 | 状态 |
 | --- | --- |
-| **8.0.78** | 全部适配，本机实测 9/9 |
+| **8.0.80** | 全部适配，35/35 槽位命中（开屏广告判定在 8.0.80 改名为 `N2`，改按方法内特征定位） |
+| 8.0.78 | 全部适配，本机实测 9/9 |
 | 8.0.79 / 8.0.77 | 全部适配（8.0.79 的撤回标签与开屏广告锚点在 1.3.9 修正） |
 | 8.0.76 / 8.0.74 | 全部适配；骰子结果改写降级（选择框仍在） |
 | 8.0.72 | 防撤回 / 表情 / 原图 / 扫码 / 入口 全通 |
@@ -161,6 +162,20 @@ sh tools/build-audio.sh --test   # 重编音频库并自测
 ---
 
 ## 更新日志
+
+### v1.5.0（2026-11-10）— 适配微信 8.0.80 + 环境隐蔽
+
+**兼容**
+- 锚点表补 8.0.80（3220），35 个槽位全中；8.0.72 ~ 8.0.79 原表保留
+- 小程序开屏广告判定在 8.0.80 从 `K2` 改名为 `N2`、类从 `f7` 换到 `g7`。槽位改成按方法内
+  日志特征（`checkCanShowAd`）定位，表里直接记「类#方法」，`AdBlock` 优先用表里的方法名 ——
+  下次微信再改名只要重跑 `tools/gen-anchors.py`，不用改 Java
+
+**隐蔽性**
+- 拦微信自带的三道探针：① 栈帧自检（TinkerCrashProtect 遍历栈找 `XposedBridge`）
+  ② Matrix `checkHook` 对 `libwechatcrash` 等 so 的 native 自查 ③ 「已装应用列表」里的包名自证
+- `Stealth` 从启动后 1.2 秒的延后队列提到最早期 —— 前两道在启动阶段就可能跑过一次，晚装等于没装
+- 隐蔽开关默认开（`K_STEALTH`），面板「环境隐蔽」一行报各探针挂载数；单道装不上不影响另外两道
 
 ### v1.4.0（2026-10-28）— 两轮兼容性优化
 

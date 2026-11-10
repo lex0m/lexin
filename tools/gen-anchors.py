@@ -104,11 +104,16 @@ SLOTS = {
         "note": "与 sns_db 同一批类，靠种子/表定位",
     },
     # ── 去广告：小程序开屏广告判定 ──
+    # 8.0.80 起判定方法从 K2 换成 N2、类从 f7 换成 g7，靠方法名已经挂不住了。
+    # 改成按方法体里的日志特征（checkCanShowAd 那一串）定位，并把方法名一起写进表
+    # （"类#方法"），AdBlock 按表里的方法名挂 —— 下次再改名也只需要重跑本脚本。
     "ad_appbrand": {
         "pkg": "com.tencent.mm.plugin.appbrand",
-        "simple": r"^[a-z0-9]{1,3}$",
-        "method": "K2(*):boolean",
+        "simple": r"^[a-zA-Z0-9_$]{1,3}$",
+        "strings": ["checkCanShowAd, "],
+        "emitMethod": "checkCanShowAd, ",
         "scan": True,
+        "note": "开屏广告判定（checkCanShowAd）：8.0.80 = g7#N2；旧版是 #K2",
     },
     "ad_open": {
         "pkg": "",
@@ -285,11 +290,48 @@ SLOTS = {
         "scan": False,
         "note": "SQLite 包装（拿 WCDB SQLiteDatabase 实例）",
     },
+    # ══════════════════════════════════════════════════════════════════════
+    # 隐蔽性（v1.5）：微信自己装了三道探针，都会被我们这套 hook 触发。
+    # 三个槽位都靠「方法里的特征字符串」定位，类名/方法名再变也认得出来。
+    # ══════════════════════════════════════════════════════════════════════
+    # ① 栈帧自检：Tinker 的崩溃保护会遍历调用栈，看到 de.robv...XposedBridge
+    #    就判 "have xposed"，然后清掉自己的补丁并写日志 —— 这是微信唯一在 Java
+    #    层主动找 Xposed 的地方（8.0.80 = com.tencent.mm.app.j3#a）。
+    "xposed_check": {
+        "pkg": "",
+        "simple": r"^.+$",
+        "strings": ["de.robv.android.xposed.XposedBridge"],
+        "emitMethod": "de.robv.android.xposed.XposedBridge",
+        "scan": False,
+        "note": "栈帧检测（TinkerCrashProtect）：8.0.80 = com.tencent.mm.app.j3#a",
+    },
+    # ② Matrix 的 native hook 检测：往 libwechatcrash / libwxperf-tkill /
+    #    libtrace-canary / libwechatbacktrace / libmatrix-junwind 里装 native hook
+    #    自查完整性（日志 #checkHook hooking）。不拦它，native 层照样能看出被改过。
+    "matrix_hookcheck": {
+        "pkg": "",
+        "simple": r"^.+$",
+        "strings": ["#checkHook hooking", "matrix-signaledhook"],
+        "emitMethod": "#checkHook hooking",
+        "scan": False,
+        "note": "Matrix checkHook（native 自查）：8.0.80 = pv0.u0#a",
+    },
+    # ③ 服务端探针：sysmsg 里下发 ClientCheckHook（还有 ClientCheckConsistency /
+    #    ClientCheckGetAppList / ClientCheckSensorCollect），客户端按 seq 回包。
+    #    这是腾讯服务端主动问「你这台机器装了什么、有没有被动过」的入口。
+    "client_check": {
+        "pkg": "",
+        "simple": r"^.+$",
+        "strings": [".sysmsg.ClientCheckHook.clientcheck.seq"],
+        "emitMethod": ".sysmsg.ClientCheckHook.clientcheck.seq",
+        "scan": False,
+        "note": "sysmsg 分派（ClientCheck* 探测）：8.0.80 = w41.u#j7",
+    },
 }
 
 # 版本名 -> versionCode（写进表里，运行时用来对齐「装的是哪一版」）
 EXPECT_CODE = {
-    "8.0.79": 3200, "8.0.78": 3180, "8.0.77": 3160,
+    "8.0.80": 3220, "8.0.79": 3200, "8.0.78": 3180, "8.0.77": 3160,
     "8.0.76": 3140, "8.0.74": 3120, "8.0.72": 3100,
     "8.0.71": 3080, "8.0.70": 3060, "8.0.60": 2900, "8.0.56": 2800,
 }

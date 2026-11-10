@@ -89,7 +89,11 @@ final class AdBlock {
     }
 
     /** 把所有 boolean 重载都答「否」，宿主跳过分支。 */
-    private static int deny(String slot, String name) {
+    private static int deny(String slot, String fallback) {
+        // 锚点表里带 "类#方法" 时以表为准 —— 8.0.80 把开屏广告判定从 K2 改成了 N2，
+        // 方法名再靠人肉记就会一直踩空。表里没方法名（旧版本、运行时扫出来的）才用老名字。
+        String mn = Anchors.methodNameOf(Anchors.entryWithMethod(slot));
+        final String name = (mn == null || mn.isEmpty()) ? fallback : mn;
         List<Class<?>> list = Anchors.all(slot);
         int hits = 0;
         for (final Class<?> c : list) {

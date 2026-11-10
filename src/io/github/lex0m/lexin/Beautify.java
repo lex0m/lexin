@@ -20,7 +20,9 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.InputStream;
 import java.lang.ref.WeakReference;
 import java.lang.reflect.Method;
 import java.util.Collections;
@@ -636,6 +638,59 @@ final class Beautify {
         }
     }
 
+    /**
+     * 老版本把背景图写在微信 files/ 里（实测 1.4MB），v1.5 起改存模块侧。
+     * 迁移时**先写回模块侧再删本地**，否则用户刚删完背景就没了。
+     */
+    private static void pushLegacyToProvider(File legacy) {
+        java.io.InputStream in = null;
+        java.io.OutputStream out = null;
+        try {
+            android.content.Context ctx = Features.app;
+            if (ctx == null) return;
+            out = ctx.getContentResolver().openOutputStream(BgProvider.uri());
+            if (out == null) return;
+            in = new java.io.FileInputStream(legacy);
+            byte[] buf = new byte[16384];
+            int n;
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+            out.flush();
+        } catch (Throwable ignored) {
+            // 搬不动就先留着本地文件，下次再搬
+        } finally {
+            try { if (in != null) in.close(); } catch (Throwable ignored) { }
+            try { if (out != null) out.close(); } catch (Throwable ignored) { }
+        }
+    }
+
+    /**
+     * 从 provider 直接把背景图解到内存（微信进程不落盘）。
+     * 图最大 16MB 上限：超过就是异常数据，宁可当没有背景也不要把微信内存吃满。
+     */
+    private static Bitmap decodeFromProvider(BitmapFactory.Options opts) {
+        InputStream in = null;
+        try {
+            android.content.Context ctx = Features.app;
+            if (ctx == null) return null;
+            in = ctx.getContentResolver().openInputStream(BgProvider.uri());
+            if (in == null) return null;
+            ByteArrayOutputStream bo = new ByteArrayOutputStream(256 * 1024);
+            byte[] buf = new byte[16384];
+            int n;
+            while ((n = in.read(buf)) > 0) {
+                bo.write(buf, 0, n);
+                if (bo.size() > 16 * 1024 * 1024) return null;
+            }
+            byte[] data = bo.toByteArray();
+            if (data.length <= 0) return null;
+            return BitmapFactory.decodeByteArray(data, 0, data.length, opts);
+        } catch (Throwable t) {
+            return null;
+        } finally {
+            try { if (in != null) in.close(); } catch (Throwable ignored) { }
+        }
+    }
+
     private static boolean ensureImage(File dir, int w, int h) {
         String mode = Storage.str(K_BG_MODE, "fill");
         boolean blurOn = Storage.on(K_BLUR_ON, false);
@@ -648,14 +703,24 @@ final class Beautify {
         if (key.equals(imgKey) && imgBg != null) return true;
 
         try {
-            File f = new File(dir, BG_FILE);
-            if (!f.exists() || f.length() <= 0) {
-                if (!pullBackground(f)) return false;
-            }
-
             BitmapFactory.Options opts = new BitmapFactory.Options();
             if (blurOn && radius > 1) opts.inSampleSize = Math.max(2, radius);
-            Bitmap src = BitmapFactory.decodeFile(f.getAbsolutePath(), opts);
+
+            // v1.5：背景图只在模块侧存一份，微信进程**不落盘**。
+            // 老版本会在微信 files/ 里留一张 .bg.dat（实测 1,436,042 B），那是最好抓的痕迹之一。
+            // 兼容：微信目录里若还有老文件，读一次就删掉，之后走 provider 纯内存解码。
+            Bitmap src = null;
+            try {
+                File legacy = new File(dir, BG_FILE);
+                if (legacy.isFile() && legacy.length() > 0) {
+                    src = BitmapFactory.decodeFile(legacy.getAbsolutePath(), opts);
+                    if (src != null) pushLegacyToProvider(legacy);   // 先搬回模块侧，再删本地
+                    legacy.delete();
+                }
+            } catch (Throwable ignored) {
+                // 老文件读不出来就走 provider
+            }
+            if (src == null) src = decodeFromProvider(opts);
             if (src == null) return false;
 
             Bitmap cropped = cropPercent(src, Storage.num(K_BG_CX, 0), Storage.num(K_BG_CY, 0),

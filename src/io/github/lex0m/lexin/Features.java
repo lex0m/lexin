@@ -65,6 +65,10 @@ final class Features {
                 // 通道建不起来不影响其它功能
             }
         }
+        // ── 隐蔽：最先装 ──
+        // 栈帧自检（TinkerCrashProtect）和 Matrix 的 native 自查都可能在启动阶段就跑过一次，
+        // 排在功能后面装等于白装，所以它不吃 1.2 秒的延后。
+        step(Stealth::install);
         step(Settings::install);
         step(FwdProbe::probe);          // 转发增强探针：只在诊断日志打开时输出，用来定位挂点
         // ── 核心：随启动装（撤回 / 朋友圈 / 去广告 / 步数）──
@@ -88,7 +92,6 @@ final class Features {
                 EmojiGame::install,
                 Beautify::install,
                 Theme::install,
-                Stealth::install,
                 FloatingFooter::install,
                 HomeFloatingTab::install,
         });

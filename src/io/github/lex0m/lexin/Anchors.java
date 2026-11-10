@@ -91,6 +91,13 @@ final class Anchors {
     static final String MODIFY_CONTACT_LABEL = "modify_contact_label";
     static final String CORE_STORAGE = "core_storage";
     static final String SQLITE_DB_WRAPPER = "sqlite_db_wrapper";
+    // ── v1.5 隐蔽性：微信自己的三道探针（全在 Java 层可拦） ──
+    /** 栈帧自检：遍历调用栈找 de.robv...XposedBridge（TinkerCrashProtect）。 */
+    static final String XPOSED_CHECK = "xposed_check";
+    /** Matrix 的 native hook 自查（往 libwechatcrash 等 so 里装检测）。 */
+    static final String MATRIX_HOOKCHECK = "matrix_hookcheck";
+    /** 服务端 sysmsg 探针分派口（ClientCheckHook / Consistency / GetAppList…）。 */
+    static final String CLIENT_CHECK = "client_check";
 
     private static final String[] ALL_SLOTS = {
             SYSMSG, MSG, CHAT_BINDER, CHAT_ADAPTER, RNG, EMOJI_PANEL,
@@ -100,6 +107,7 @@ final class Anchors {
             TRANSFORM_COMPONENT, CHAT_BIND_MVVM, CHATTING_CONTEXT, CHATTING_ADAPTER_V3, API_MANAGER,
             CHAT_FOOTER,
             NET_SCENE_QUEUE, MM_KERNEL, ADD_CONTACT_LABEL, MODIFY_CONTACT_LABEL, CORE_STORAGE, SQLITE_DB_WRAPPER,
+            XPOSED_CHECK, MATRIX_HOOKCHECK, CLIENT_CHECK,
     };
 
     /** 功能 -> 它需要的槽位（面板按功能报适配状态，比按槽位报更好懂）。 */
@@ -119,6 +127,8 @@ final class Anchors {
             {"自动语音转文字", TRANSFORM_COMPONENT, CHAT_BIND_MVVM, CHATTING_CONTEXT, CHATTING_ADAPTER_V3, API_MANAGER},
             {"悬浮聊天底栏", CHAT_FOOTER},
             {"批量分类标签", NET_SCENE_QUEUE, MM_KERNEL, ADD_CONTACT_LABEL, MODIFY_CONTACT_LABEL, CORE_STORAGE, SQLITE_DB_WRAPPER},
+            // v1.5：三道探针都拦住才算「环境隐蔽」达标（面板一行，不单独拆开关）。
+            {"环境隐蔽", XPOSED_CHECK, MATRIX_HOOKCHECK, CLIENT_CHECK},
     };
 
     // ── 状态 ────────────────────────────────────────────────────────────────

@@ -14,6 +14,7 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 public final class Entry implements IXposedHookLoadPackage, IXposedHookZygoteInit {
 
     static final String HOST = "com.tencent.mm";
+    static final String MODULE = "io.github.lex0m.lexin";
 
     /** 最早的入口回调：框架在这里把模块 APK 路径交给我们，主题资源才能直接从 APK 读。 */
     @Override

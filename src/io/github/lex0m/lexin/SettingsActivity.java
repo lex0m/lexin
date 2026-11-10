@@ -22,6 +22,7 @@ public class SettingsActivity extends Activity {
     @Override
     protected void onCreate(Bundle saved) {
         super.onCreate(saved);
+        if (!Ui.launchedByTrusted(this)) { finish(); return; }   // 第三方拉不开
         Ui.noForceDark(this);          // 深色模式下别把浅色界面强制反转
         Prefs.init(getApplicationContext());
         Disclaimer.gate(this, new Runnable() {

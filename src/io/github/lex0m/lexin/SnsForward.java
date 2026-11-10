@@ -558,7 +558,7 @@ final class SnsForward {
                         }
                     });
                 }
-            }, "lexin-sns-share").start();
+            }, "s" + Integer.toHexString((int) (System.nanoTime() & 0xFFF))).start();
         } catch (Throwable t) {
             Log.d(T + "send failed: " + t);
             toast(act, "转发失败：" + t.getClass().getSimpleName());

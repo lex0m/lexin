@@ -25,6 +25,8 @@ final class Prefs {
     static final String K_FLOAT_FOOTER = Storage.K_FLOAT_FOOTER;
     static final String K_BATCH_LABEL = Storage.K_BATCH_LABEL;
     static final String K_HOME_FLOAT_TAB = Storage.K_HOME_FLOAT_TAB;
+    /** v1.5 环境隐蔽（默认开）。 */
+    static final String K_STEALTH = Storage.K_STEALTH;
 
     /** ctx is ignored now - the store is file based and process independent. */
     static void init(Context ctx) {
@@ -44,6 +46,7 @@ final class Prefs {
     static boolean def(String key) {
         return K_RECALL.equals(key) || K_MOMENTS.equals(key) || K_ADS.equals(key)
                 || K_MEDIA.equals(key) || K_LIMITS.equals(key) || K_SCAN.equals(key)
+                || K_STEALTH.equals(key)                                   // 环境隐蔽默认开：不是功能，是前提
                 || K_FWD_MENU.equals(key) || K_FWD_SELECT.equals(key);   // 转发增强默认开（本地 UI 功能，零联网）
     }
 

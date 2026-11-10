@@ -405,8 +405,8 @@ final class SettingsPanel {
             @Override
             public void run() {
                 try {
-                    java.io.File f = new java.io.File(host.getFilesDir(), Beautify.BG_FILE);
-                    if (f.exists()) f.delete();
+                    // v1.5：图在模块侧，删它要经过 provider（微信进程不再碰自己的目录）
+                    host.getContentResolver().delete(BgProvider.uriOf(BgProvider.PATH_BG), null, null);
                 } catch (Throwable ignored) {
                     // 忽略
                 }
