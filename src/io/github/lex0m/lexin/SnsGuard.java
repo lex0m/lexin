@@ -37,7 +37,7 @@ final class SnsGuard {
         int n = 0;
         n += hook(Anchors.SNS_DB, "A", 2);
         n += hook(Anchors.SNS_DB2, "H", 3);
-        Status.set("朋友圈保留", n > 0);
+        Status.armed("朋友圈保留", n);
         Status.note("朋友圈保留", n > 0 ? "只拦朋友圈表上的 DELETE，其它 SQL 原样放行"
                 : "当前微信版本未适配");
         Log.d(T + "armed=" + n);
@@ -61,6 +61,7 @@ final class SnsGuard {
                             try {
                                 if (!Prefs.onDefault(Prefs.K_MOMENTS)) return;
                                 if (!isProtectedDelete(p.args[0])) return;
+                                Status.hit("朋友圈保留");        // SQL 执行口真的被走到了
                                 p.setResult(Boolean.FALSE);      // 「没删掉」，本地副本留下
                                 Log.d(T + "blocked delete on " + c.getSimpleName());
                             } catch (Throwable ignored) {

@@ -30,10 +30,15 @@ final class Bridge {
 
     private static final String T = "svc-bridge: ";
     /**
-     * 广播 action。刻意带模块自己的段：早期版本用了很像微信内部广播的名字，
-     * 万一撞上微信真的同名广播就会平白无故弹面板。多带一段就不会撞。
+     * 广播 action。**必须是模块自己的短串**。
+     *
+     * v1.6.1 这里用的是 S.WX_P8，解出来是微信自己的
+     * {@code com.tencent.mm.ui.intent.ACTION_MM_UI_HINT} —— 跟注释说的"带模块自己的段"相反：
+     *   ① 撞微信内部广播，微信自己发一次就弹一次面板；
+     *   ② 任何第三方 App 发同名广播都能把全屏面板弹出来（接收器 exported 且只验时间戳）。
+     * 现在改成模块私有的短 action，并加 MAC（见 Sig），伪造的直接丢。
      */
-    static final String ACTION = "com.tencent.mm.intent.ACTION_MM_UI_HINT";
+    static final String ACTION = "x.b";
 
     private static volatile WeakReference<Activity> current =
             new WeakReference<>(null);
@@ -46,16 +51,20 @@ final class Bridge {
     /** 宿主进程里调一次：注册接收器 + 跟踪前台 activity。 */
     static void install(final Context app) {
         if (armed) return;
-        armed = true;
+        // 注意：这里不再先置位。注册失败时保持 false，下次重试还有机会；
+        // 先置位再注册会让一次偶发失败变成"永久没有面板桥"。
 
         try {
             BroadcastReceiver r = new BroadcastReceiver() {
                 @Override
                 public void onReceive(Context context, Intent intent) {
                     try {
-                        // 只认带合法时间戳的那一条，避免被其它广播误触
-                        if (intent == null
-                                || intent.getLongExtra(EXTRA, 0L) < MIN_STAMP) return;
+                        // 只认带合法时间戳 + 正确 MAC 的那一条。
+                        // MAC 用构建期注入的 AnchorKey（只有本 APK 里有），第三方算不出来。
+                        if (intent == null) return;
+                        long stamp = intent.getLongExtra(EXTRA, 0L);
+                        if (stamp < MIN_STAMP) return;
+                        if (!Sig.ok(ACTION + "|" + stamp, intent.getStringExtra(Sig.EXTRA))) return;
                         requestPanel();
                     } catch (Throwable ignored) {
                         // 不打扰宿主
@@ -73,42 +82,73 @@ final class Bridge {
             Log.d(T + "receiver failed: " + t.getClass().getSimpleName());
         }
 
-        // 记录前台 activity：只有 resumed 的那个才敢拿来 show Dialog
-        XC_MethodHook hook = new XC_MethodHook() {
-            @Override
-            protected void afterHookedMethod(MethodHookParam p) {
-                try {
-                    if (!(p.thisObject instanceof Activity)) return;
-                    final Activity a = (Activity) p.thisObject;
-                    if ("onPause".equals(p.method.getName())) {
-                        // 只有 resumed 的 activity 才敢拿来 show Dialog
-                        Activity was = current.get();
-                        if (was == a) current = new WeakReference<>(null);
-                        return;
-                    }
-                    if (a.isFinishing()) return;
-                    current = new WeakReference<>(a);
-                    if (pending && "onResume".equals(p.method.getName())) {
-                        pending = false;
-                        new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
-                            @Override
-                            public void run() {
-                                Activity now = current.get();
-                                if (now != null) SettingsPanel.show(now);
-                            }
-                        }, 300L);
-                    }
-                } catch (Throwable ignored) {
-                    // 只做记录
-                }
-            }
-        };
+        // 记录前台 activity：只有 resumed 的那个才敢拿来 show Dialog。
+        // v1.6：改用官方生命周期回调 —— 以前这里挂的是 framework 的 Activity.onResume/onPause，
+        // 属于"全局可见、最容易扫到"的那一类 hook，收益却只是记一个当前 Activity。
         try {
-            XposedBridge.hookAllMethods(Activity.class, "onResume", hook);
-            XposedBridge.hookAllMethods(Activity.class, "onPause", hook);
-        } catch (Throwable ignored) {
-            // 挂不上就只能靠 intent 那条路
+            android.app.Application application = (android.app.Application) app;
+            application.registerActivityLifecycleCallbacks(
+                    new android.app.Application.ActivityLifecycleCallbacks() {
+                        @Override
+                        public void onActivityResumed(final Activity a) {
+                            try {
+                                if (a == null || a.isFinishing()) return;
+                                // 诊断：运行中的 Activity 类 vs 用 Features.loader 解析出的类，
+                                // 身份不同 = 微信用了另一份类（Tinker 补丁），hook 必然打不中。
+                                try {
+                                    Class<?> viaBase = Class.forName(a.getClass().getName(),
+                                            false, Features.loader);
+                                    Log.d("svc-core: act=" + a.getClass().getName()
+                                            + " sameClass=" + (viaBase == a.getClass())
+                                            + " actLoader=" + a.getClass().getClassLoader());
+                                } catch (Throwable ignored) {
+                                    // 诊断失败不影响面板
+                                }
+                                current = new WeakReference<>(a);
+                                // 运行时 loader 只在真有 Activity 之后才可见（Tinker 的
+                                // DelegateLastClassLoader），拿到就换过去并重挂核心 hook。
+                                Features.adoptLoader(a.getClass().getClassLoader());
+                                if (pending) {
+                                    pending = false;
+                                    new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+                                        @Override
+                                        public void run() {
+                                            Activity now = current.get();
+                                            if (now != null && !now.isFinishing()) {
+                                                SettingsPanel.show(now);
+                                            } else {
+                                                // 这 300ms 里页面被切走了：请求放回去，下次 resume 再开
+                                                pending = true;
+                                            }
+                                        }
+                                    }, 300L);
+                                }
+                            } catch (Throwable ignored) {
+                                // 只做记录
+                            }
+                        }
+
+                        @Override
+                        public void onActivityPaused(Activity a) {
+                            try {
+                                Activity was = current.get();
+                                if (was == a) current = new WeakReference<>(null);
+                            } catch (Throwable ignored) {
+                                // 只做记录
+                            }
+                        }
+
+                        @Override public void onActivityCreated(Activity a, android.os.Bundle b) { }
+                        @Override public void onActivityStarted(Activity a) { }
+                        @Override public void onActivityStopped(Activity a) { }
+                        @Override public void onActivitySaveInstanceState(Activity a, android.os.Bundle b) { }
+                        @Override public void onActivityDestroyed(Activity a) { }
+                    });
+            Log.d(T + "lifecycle armed");
+        } catch (Throwable t) {
+            Log.d(T + "lifecycle failed: " + t.getClass().getSimpleName());
         }
+        armed = true;
     }
 
     /** 收到"开面板"的请求：前台开着就立刻开，否则挂起。 */

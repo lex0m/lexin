@@ -41,6 +41,8 @@ final class Storage {
     // ── keys（对外 API 不变，其它 50 个文件零改动） ────────────────────────
 
     static final String K_RECALL = "recall";
+    /** 防撤回自己（默认关：拦自己撤回会变成"我撤不回自己的消息"，属于异常行为）。 */
+    static final String K_RECALL_SELF = "recall_self";
     static final String K_MOMENTS = "moments";
     static final String K_ADS = "ads";
     static final String K_MEDIA = "media";
@@ -74,13 +76,26 @@ final class Storage {
     private static volatile boolean hostSide = false;
     private static volatile boolean inited = false;
     /** 微信侧：从 provider 拉来的全量镜像；模块侧：本地文件的镜像。 */
-    private static final Map<String, String> mem = new HashMap<>();
+    /**
+     * 配置内存镜像。**必须是并发容器**：读路径（hook 回调线程）不加锁，
+     * 写路径（面板/广播线程）在 synchronized 里 clear+put —— 用 HashMap 的话，
+     * 读线程会在 clear 与 put 之间读到半张空表，配置瞬间回默认值。
+     */
+    private static final Map<String, String> mem = new java.util.concurrent.ConcurrentHashMap<>();
     private static volatile boolean loaded = false;
     private static volatile boolean loading = false;
     private static volatile long stamp = 0L;
     private static volatile boolean watching = false;
     /** 只在模块侧用：脏标记，写操作后立即落盘（低频，开销可忽略）。 */
     private static volatile boolean dirty = false;
+    /**
+     * 配置是否已经真的拿到（模块镜像读到了，或广播推送到了）。
+     *
+     * 懒挂载必须看这个：拿不到配置时按默认值"不挂"会把用户开着的功能饿死，
+     * 所以只有"确认拿到配置且明确是关"才跳过挂载。
+     */
+    private static volatile boolean confident = false;
+
     /** 诊断用的最后一条内部消息（只存内存，绝不落盘）。 */
     private static volatile String lastDiag = "";
 
@@ -98,11 +113,12 @@ final class Storage {
                     hostSide = Entry.HOST.equals(pkg);
                 }
                 if (hostSide) {
-                    // 微信侧：**不建任何文件**。
-                    // 不在 init 里做同步 IPC —— provider 冷启动要拉起模块进程，那会把
-                    // 几百毫秒压在微信的启动路径上（这是"稳定性"最容易翻车的地方）。
+                    // v1.6：宿主侧零落盘、零读宿主文件。先读模块侧镜像（只读），
+                    // 读不到就等广播，再没有就用默认值。
+                    loadModulePrefs(ctx);
+                    loaded = true;
                     watch();
-                    prefetch();          // 内含：拉配置 → 迁移旧键 → 清残留
+                    prefetch();          // 内含：迁移旧键 → 拉最新全量
                 } else {
                     loadFromDisk();
                     loaded = true;
@@ -172,6 +188,7 @@ final class Storage {
             loaded = false;
             mem.clear();
             stamp = 0L;
+            confident = false;      // 配置失效 → 懒挂载闸门回到"未知"，维持旧行为
         }
     }
 
@@ -249,6 +266,86 @@ final class Storage {
     /** 旧版物理键前缀（v1.4 及更早）。 */
     private static final String LEGACY_PREFIX = "ap_";
 
+    /**
+     * 微信侧本地兜底（v1.5.1）。
+     *
+     * v1.5 把配置改成「微信进程零落盘 + 纯广播」，在本机直接翻车：MIUI 的唤醒路径管控会把
+     * 「微信 → 乐信」的广播判成 Security_WakePath 拒掉（logcat 实证：
+     * {@code Broadcast Reject caller=com.tencent.mm callee=io.github.lex0m.lexin action=x.q}），
+     * 于是微信每次启动都只能读默认值 —— 用户在面板里打开的开关永远不生效。
+     *
+     * 现在恢复 v1.4 的兜底：微信进程自己也存一份，写进它本来就在用的
+     * {@code <pkg>_preferences}，键名做 hex 混淆（{@code ap_616473} = "ads"），
+     * 不新建文件、不留明文语义。广播仍然保留，用于「模块侧改完立刻生效」。
+     */
+    private static String prefKey(String logical) {
+        StringBuilder sb = new StringBuilder(LEGACY_PREFIX);
+        try {
+            for (byte b : logical.getBytes("UTF-8")) {
+                sb.append(Character.forDigit((b >> 4) & 0xF, 16));
+                sb.append(Character.forDigit(b & 0xF, 16));
+            }
+        } catch (Throwable ignored) {
+            return LEGACY_PREFIX + Integer.toHexString(logical.hashCode());
+        }
+        return sb.toString();
+    }
+
+    /** 反解 {@link #prefKey}；老版本那种 hash 键解不出来（返回 null，交给迁移逻辑）。 */
+    private static String prefLogical(String phys) {
+        if (phys == null || !phys.startsWith(LEGACY_PREFIX)) return null;
+        String hex = phys.substring(LEGACY_PREFIX.length());
+        if (hex.isEmpty() || (hex.length() & 1) != 0) return null;
+        try {
+            byte[] b = new byte[hex.length() / 2];
+            for (int i = 0; i < b.length; i++) {
+                int v = Integer.parseInt(hex.substring(i * 2, i * 2 + 2), 16);
+                if (v < 0x20 || v > 0x7E) return null;      // 老 hash 键不是 ASCII
+                b[i] = (byte) v;
+            }
+            return new String(b, "UTF-8");
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
+     * 微信侧启动：读模块侧镜像（v1.6.0）。
+     *
+     * v1.5.1 在这里读的是**微信自己的** prefs，并且把配置写回去当兜底 —— 那是整套方案里最硬的
+     * 一处痕迹：微信只要枚举自己的 SharedPreferences 就能看见 ap_* 键，还能顺着键名反推功能。
+     * 现在改成只读模块侧（XSharedPreferences，全反射），读不到就等广播，再没有就用默认值。
+     * 宁可功能按默认档跑，也不往对方目录写一个字节。
+     */
+    private static void loadModulePrefs(Context c) {
+        try {
+            String blob = XP.read(MODULE_PKG, XP.KEY);
+            if (blob == null || blob.isEmpty()) {
+                log("module prefs unavailable");
+                return;
+            }
+            byte[] raw = android.util.Base64.decode(blob, android.util.Base64.NO_WRAP);
+            byte[] plain = xor(raw, raw.length);
+            String text = new String(plain, "UTF-8");
+            int n = 0;
+            synchronized (Storage.class) {
+                mem.clear();
+                for (String line : text.split("\n")) {
+                    int eq = line.indexOf('=');
+                    if (eq <= 0) continue;
+                    mem.put(line.substring(0, eq), line.substring(eq + 1));
+                    n++;
+                }
+            }
+            if (n > 0) {
+                confident = true;
+                log("module prefs loaded " + n);
+            }
+        } catch (Throwable t) {
+            log("module prefs: " + t.getClass().getSimpleName());
+        }
+    }
+
     private static void migrateLegacyPrefs(Context ctx) {
         try {
             // 运行期拼装：dex 常量池里不留这个文件名（R8 会把字面量拼接折叠，必须用运行期值派生）
@@ -260,25 +357,42 @@ final class Storage {
 
             android.content.SharedPreferences.Editor e = null;
             int migrated = 0;
+            java.util.Set<String> done = new java.util.HashSet<>();
             for (String logical : LEGACY_KEYS) {
                 String phys = LEGACY_PREFIX + Integer.toHexString(logical.hashCode());
                 if (!all.containsKey(phys)) continue;
+                done.add(phys);
                 Object v = all.get(phys);
                 String enc = null;
                 if (v instanceof Boolean) enc = encodeBool((Boolean) v);
                 else if (v instanceof Integer) enc = encodeInt((Integer) v);
                 else if (v instanceof String) enc = encodeStr((String) v);
                 if (enc == null) continue;
-                putViaProvider(logical, enc);
+                put(logical, enc);
                 if (e == null) e = old.edit();
                 e.remove(phys);
                 migrated++;
             }
+            // v1.5.1 写过「ap_+字节hex」形式的键。以前这里把所有 ap_* 一律 remove，
+            // 认不出的（正是 v1.5.x 用户的数据）被直接删掉 —— 升级即丢配置。
+            // 现在先按 hex 反解再迁一次，最后只删确实搬走了的。
             for (String k : all.keySet()) {
-                if (k != null && k.startsWith(LEGACY_PREFIX)) {
-                    if (e == null) e = old.edit();
-                    e.remove(k);
+                if (k == null || !k.startsWith(LEGACY_PREFIX)) continue;
+                if (done.contains(k)) continue;                  // 已经在上面的循环里处理过
+                String logical = prefLogical(k);
+                if (logical != null && !mem.containsKey(logical)) {
+                    Object v = all.get(k);
+                    String enc = null;
+                    if (v instanceof Boolean) enc = encodeBool((Boolean) v);
+                    else if (v instanceof Integer) enc = encodeInt((Integer) v);
+                    else if (v instanceof String) enc = encodeStr((String) v);
+                    if (enc != null) {
+                        put(logical, enc);
+                        migrated++;
+                    }
                 }
+                if (e == null) e = old.edit();
+                e.remove(k);
             }
             if (e != null) e.apply();
             if (migrated > 0) {
@@ -328,6 +442,7 @@ final class Storage {
      */
     static void applyRemote(java.util.List<String> kv) {
         if (kv == null) return;
+        boolean ready;
         synchronized (Storage.class) {
             mem.clear();
             for (String line : kv) {
@@ -338,6 +453,18 @@ final class Storage {
             stamp = System.currentTimeMillis();
             loaded = true;
             loading = false;
+            // 空列表不算"拿到配置"：首次安装时模块侧可能还没写出任何键，
+            // 把它当"用户全关了"会让懒挂载把功能饿死。
+            if (!mem.isEmpty()) confident = true;
+            ready = confident;
+        }
+        // 配置到位 → 让 Features 补装那些因为"配置未知"被跳过的默认关功能
+        if (ready) {
+            try {
+                Features.onConfigReady();
+            } catch (Throwable ignored) {
+                // 模块还没初始化完就忽略，下次推送再来
+            }
         }
     }
 
@@ -385,6 +512,7 @@ final class Storage {
             mem.put(key, encoded);
         }
         if (hostSide) {
+            // v1.6：宿主侧只在内存里更新，并如实告诉模块侧（不写任何文件）
             putViaProvider(key, encoded);
         } else {
             dirty = true;
@@ -418,10 +546,55 @@ final class Storage {
             os.write(enc);
             os.flush();
             dirty = false;
+            publishForHost();
         } catch (Throwable t) {
             log("disk write: " + t.getClass().getSimpleName());
         } finally {
             try { if (os != null) os.close(); } catch (Throwable ignored) { }
+        }
+    }
+
+    /**
+     * 模块侧：写一份「给宿主读」的镜像（模块私有目录，微信只读）。
+     *
+     * 为什么不直接让微信读 .cfg：.cfg 在模块进程私有目录，宿主进程没有权限。
+     * 这份走框架的 prefs 通道，是唯一「不碰微信目录、又能跨进程读」的路径。
+     */
+    private static void publishForHost() {
+        try {
+            Context c = appCtx;
+            if (c == null || hostSide) return;
+            StringBuilder sb = new StringBuilder(mem.size() * 24 + 32);
+            synchronized (Storage.class) {
+                for (Map.Entry<String, String> e : mem.entrySet()) {
+                    sb.append(e.getKey()).append('=').append(e.getValue()).append('\n');
+                }
+            }
+            byte[] plain = sb.toString().getBytes("UTF-8");
+            byte[] enc = xor(plain, plain.length);
+            String b64 = android.util.Base64.encodeToString(enc, android.util.Base64.NO_WRAP);
+            // LSPosed 的新 XSharedPreferences（API 93+）要求模块侧用 MODE_WORLD_READABLE 建文件，
+            // 配合 manifest 的 xposedsharedprefs meta-data；targetSdk 35 上会抛 SecurityException，
+            // 所以失败就退回私有模式（此时宿主读不到，靠广播）。
+            android.content.SharedPreferences sp;
+            try {
+                sp = c.getSharedPreferences(XP.PREFS, 1);      // MODE_WORLD_READABLE
+            } catch (Throwable t2) {
+                sp = c.getSharedPreferences(XP.PREFS, Context.MODE_PRIVATE);
+            }
+            sp.edit().putString(XP.KEY, b64).commit();
+            // 尽力放开读权限（SELinux 仍可能拦；拦了就走广播，功能不受影响）
+            try {
+                java.io.File dir = new java.io.File(c.getApplicationInfo().dataDir, "shared_prefs");
+                java.io.File f = new java.io.File(dir, XP.PREFS + ".xml");
+                dir.setExecutable(true, false);
+                dir.setReadable(true, false);
+                f.setReadable(true, false);
+            } catch (Throwable ignored) {
+                // 改不动权限不影响主流程
+            }
+        } catch (Throwable t) {
+            log("publish: " + t.getClass().getSimpleName());
         }
     }
 
@@ -575,6 +748,11 @@ final class Storage {
 
     static boolean isHostSide() {
         return hostSide;
+    }
+
+    /** 配置是否已确认拿到（懒挂载的闸门）。 */
+    static boolean confident() {
+        return confident;
     }
 
     private static void log(String s) {

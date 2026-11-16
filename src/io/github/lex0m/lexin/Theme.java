@@ -445,7 +445,7 @@ final class Theme {
         int hits = 0;
         try {
             Class<?> comp = Silent.cls(Features.loader,
-                    "com.tencent.mm.ui.chatting.component.v2");
+                    S.WX_P11);
             if (comp == null) {
                 Log.d(T + "background component missing");
                 return 0;

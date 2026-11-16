@@ -43,6 +43,14 @@ import de.robv.android.xposed.XposedBridge;
 final class AntiRecall {
 
     private static final String T = "svc-recall: ";
+    /** 诊断：每个回调只打前几条，避免刷屏。 */
+    private static final java.util.concurrent.atomic.AtomicInteger CB_LOG =
+            new java.util.concurrent.atomic.AtomicInteger();
+    private static void cbLog(String where) {
+        if (CB_LOG.get() > 200) return;
+        CB_LOG.incrementAndGet();
+        Log.d(T + "cb " + where);
+    }
 
     private static final String TYPE_KEY = ".sysmsg.$type";
     private static final String NEW_MSG_ID = ".sysmsg.revokemsg.newmsgid";
@@ -53,7 +61,7 @@ final class AntiRecall {
 
     private static final String F_SVR_ID = "field_msgSvrId";
     private static final String F_TALKER = "field_talker";
-    private static final String VIEWITEMS_PKG = "com.tencent.mm.ui.chatting.viewitems";
+    private static final String VIEWITEMS_PKG = S.WX_P1;
 
     private static final char KEY_SEP = '\u001F';
     /** 被撤回的消息压暗到这个透明度：能看出「变淡了」，文字仍然看得清。 */
@@ -77,6 +85,12 @@ final class AntiRecall {
     private static final Map<View, String> bound =
             Collections.synchronizedMap(new WeakHashMap<View, String>());
     /** 行 -> 已应用的标记，便于复用前精确还原。 */
+    /** 数据库层拦下的撤回：msgId -> 是否自己发起（该层拿不到 talker/svrId）。 */
+    private static final Map<Long, Boolean> blockedIds = new java.util.concurrent.ConcurrentHashMap<>();
+    /** 行 -> 它当前绑定的 msgId（数据库兜底按这个匹配）。 */
+    private static final Map<View, Long> boundId =
+            Collections.synchronizedMap(new WeakHashMap<View, Long>());
+
     private static final Map<View, Mark> marked =
             Collections.synchronizedMap(new WeakHashMap<View, Mark>());
 
@@ -152,11 +166,74 @@ final class AntiRecall {
     static void install() {
         restore();
         boolean core = hookSysmsg();
-        boolean binder = hookBinder();
-        // 兜底路径会挂在框架的热方法上。能走版本表的绑定器就不挂，少一分痕迹。
-        if (!binder) hookAdapters();
-        Status.set("消息防撤回", core);
-        Status.note("消息防撤回", core ? "撤回指令已在本地失效，原消息保留" : "当前微信版本未适配");
+        boolean direct = hookRevokeHandler();
+        int mark = hookBinder() ? 1 : 0;
+        // 能走版本表的绑定器就不挂兜底；兜底也只在微信自己的适配器类里找（不碰 framework）。
+        if (mark == 0) mark = hookAdapters();
+        boolean any = core || direct;
+        // v1.6：挂载数如实记（sysmsg 上游 + doRevokeMsg 下游 + 行标记），
+        // 是否真的生效看 Probe 的命中数，不再用一个布尔概括全部。
+        Status.armed("消息防撤回", (core ? 1 : 0) + (direct ? 1 : 0));
+        Status.armed("撤回标记", mark);
+        Status.note("消息防撤回", any
+                ? ("撤回已在本地失效" + (direct ? "（直接拦 doRevokeMsg）" : "（sysmsg 抹类型）"))
+                : "当前微信版本未适配");
+    }
+
+    /**
+     * 数据库兜底拦下一条撤回时调用（{@link DbGuard}）。
+     * 这一层只有 msgId，没有 talker/svrId，所以单独记一张表，绑定时按 msgId 匹配。
+     */
+    static void onBlocked(long msgId, boolean self) {
+        if (msgId <= 0) return;
+        if (blockedIds.size() > 500) blockedIds.clear();
+        blockedIds.put(msgId, self);
+        Log.d(T + "blocked id=" + msgId + " self=" + self);
+        // 气泡标记依赖行绑定 hook（8.0.80 上没被调用），先给一个稳定的可见反馈。
+        toastBlocked(self);
+        new Handler(Looper.getMainLooper()).post(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    java.util.List<View> hit = new ArrayList<>();
+                    synchronized (boundId) {
+                        for (Map.Entry<View, Long> e : boundId.entrySet()) {
+                            if (e.getValue() != null && e.getValue() == msgId) hit.add(e.getKey());
+                        }
+                    }
+                    Boolean sf = blockedIds.get(msgId);
+                    for (View v : hit) mark(v, sf != null && sf);
+                } catch (Throwable ignored) {
+                    // 仅外观
+                }
+            }
+        });
+    }
+
+    private static volatile long lastToast = 0L;
+
+    /** 拦下撤回时弹一条轻提示（限速 1 秒，避免连发刷屏）。 */
+    private static void toastBlocked(final boolean self) {
+        long now = System.currentTimeMillis();
+        if (now - lastToast < 1000L) return;
+        lastToast = now;
+        try {
+            new Handler(Looper.getMainLooper()).post(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        if (Features.app == null) return;
+                        android.widget.Toast.makeText(Features.app,
+                                self ? "乐信：已拦截自己的撤回" : "乐信：已拦截一条撤回",
+                                android.widget.Toast.LENGTH_SHORT).show();
+                    } catch (Throwable ignored) {
+                        // 提示失败不影响拦截
+                    }
+                }
+            });
+        } catch (Throwable ignored) {
+            // 同上
+        }
     }
 
     /** 撤回后，把屏幕上已经画出这条消息的行全部重刷一遍标记。 */
@@ -185,6 +262,60 @@ final class AntiRecall {
 
     // ── 拦截：收到的撤回 ────────────────────────────────────────────────────
 
+    /**
+     * 直接拦微信自己的撤回处理器 doRevokeMsg（v1.5.2）。
+     *
+     * 以前只拦上游 sysmsg 解析（抹 {@code $.sysmsg.$type}）。8.0.80 上那条不再是必经路径
+     * —— 解析结果里不带 revokemsg，本地消息照样被改写成「xx撤回了一条消息」。
+     * 开源实现（yylsping/wechat-anti-recall）用的就是这个下游节点：
+     * 签名 {@code g(String talker, long serverId, p0 envelope, String, String, String) -> void}，
+     * 方法体里有 {@code doRevokeMsg revokeFlag=} 日志。在它动本地消息之前跳出去，
+     * 协议事件已经收到、只是不执行本地破坏体，原消息原样保留。
+     */
+    private static boolean hookRevokeHandler() {
+        List<Class<?>> list = Anchors.all(Anchors.REVOKE_HANDLER);
+        int n = 0;
+        for (final Class<?> c : list) {
+            for (final Method m : c.getDeclaredMethods()) {
+                if (m.getReturnType() != void.class) continue;
+                Class<?>[] pt = m.getParameterTypes();
+                if (pt.length != 6 || pt[0] != String.class || pt[1] != long.class) continue;
+                try {
+                    m.setAccessible(true);
+                    XposedBridge.hookMethod(m, new XC_MethodHook() {
+                        @Override
+                        protected void beforeHookedMethod(MethodHookParam p) {
+                            try {
+                                cbLog("revoke");
+                                if (!Prefs.onDefault(Prefs.K_RECALL)) return;
+                                Status.hit("消息防撤回");      // 真被调用到了：这是 8.0.80 上最关键的证据
+                                Object talker = p.args[0];
+                                Object svrId = p.args[1];
+                                if (talker instanceof String && svrId instanceof Number) {
+                                    String key = makeKey((String) talker, String.valueOf(svrId));
+                                    synchronized (recalled) {
+                                        if (!recalled.containsKey(key)) {
+                                            recalled.put(key, false);
+                                            onRecalled(key);
+                                        }
+                                    }
+                                }
+                                p.setResult(null);      // 原消息不改写
+                            } catch (Throwable ignored) {
+                                // 不打扰宿主
+                            }
+                        }
+                    });
+                    n++;
+                } catch (Throwable ignored) {
+                    // 下一个重载
+                }
+            }
+        }
+        Log.d(T + "doRevokeMsg armed -> " + n);
+        return n > 0;
+    }
+
     private static boolean hookSysmsg() {
         Class<?> parser = Anchors.cls(Anchors.SYSMSG);
         if (parser == null) {
@@ -201,11 +332,13 @@ final class AntiRecall {
             @SuppressWarnings("unchecked")
             protected void afterHookedMethod(MethodHookParam param) {
                 try {
+                    cbLog("sysmsg");
                     Object res = param.getResult();
                     if (!(res instanceof Map)) return;
                     Map<String, Object> map = (Map<String, Object>) res;
                     if (!REVOKE_TYPE.equals(map.get(TYPE_KEY))) return;
                     if (!Prefs.onDefault(Prefs.K_RECALL)) return;
+                    Status.hit("消息防撤回");          // 上游解析器命中（与下游各记各的）
 
                     Object newId = map.get(NEW_MSG_ID);
                     if (newId == null) return;
@@ -244,6 +377,7 @@ final class AntiRecall {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) {
                         try {
+                            cbLog("binder");
                             View row = rowOf(param.args[0]);
                             if (row == null) return;
                             Object msg = findMsg(param.args[1], 2);
@@ -255,6 +389,7 @@ final class AntiRecall {
                                 }
                             }
                             bind(row, msg);
+                            Status.hit("撤回标记");        // 真画到行上才算命中
                         } catch (Throwable ignored) {
                             // 仅外观
                         }
@@ -272,66 +407,96 @@ final class AntiRecall {
     // ── 标记路径二：框架适配器（类名随版本变，但框架 API 不变） ─────────────
 
     /**
-     * 兜底路径：不管微信怎么改类名，聊天列表总得走 ListView 或 RecyclerView。
-     * 我们挂在框架侧的适配器方法上，只处理「适配器正是聊天列表」的那种情况。
+     * 兜底路径（v1.6 重写）：只用微信自己的适配器类，**不再挂 framework 的
+     * BaseAdapter / RecyclerView.Adapter**。
+     *
+     * 以前挂的是 `android.widget.BaseAdapter#getView` 和
+     * `androidx.recyclerview.widget.RecyclerView$Adapter#onBindViewHolder` —— 这两个是全 App
+     * 所有列表的公共入口，属于"一眼就能看出被 hook"的热方法，收益只是给撤回消息贴个标签。
+     * 现在只在微信侧的适配器类层次里找同名方法；找不到就算「撤回标记」未适配（少一个外观功能，
+     * 不增加检测面）。
      */
-    private static void hookAdapters() {
-        // ListView 系（老版本 / 部分页面）
-        try {
-            Class<?> base = Class.forName("android.widget.BaseAdapter", false, Features.loader);
-            XposedBridge.hookAllMethods(base, "getView", new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) {
-                    try {
-                        if (!isChatAdapter(param.thisObject)) return;
-                        Object pos = param.args[0];
-                        Object row = param.getResult();
-                        if (!(row instanceof View) || !(pos instanceof Number)) return;
-                        Object msg = msgFromAdapter(param.thisObject, ((Number) pos).intValue());
-                        bind((View) row, msg);
-                    } catch (Throwable ignored) {
-                        // 仅外观
-                    }
-                }
-            });
-        } catch (Throwable ignored) {
-            // 没有这个类就跳过
-        }
-
-        // RecyclerView 系（8.0.x 主力路径）
-        try {
-            Class<?> rv = Class.forName("androidx.recyclerview.widget.RecyclerView$Adapter",
-                    false, Features.loader);
-            XposedBridge.hookAllMethods(rv, "onBindViewHolder", new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) {
-                    try {
-                        if (!isChatAdapter(param.thisObject)) return;
-                        Object holder = param.args[0];
-                        Object pos = param.args[1];
-                        if (holder == null || !(pos instanceof Number)) return;
-                        View row = holderItemView(holder);
-                        if (row == null) return;
-                        Object msg = findMsg(holder, 2);
-                        if (msg == null) {
-                            msg = msgFromAdapter(param.thisObject, ((Number) pos).intValue());
+    private static int hookAdapters() {
+        int n = 0;
+        for (final Class<?> c : Anchors.all(Anchors.CHAT_ADAPTER)) {
+            adapterName = c.getName();
+            for (final Method m : wxMethods(c)) {
+                final String name = m.getName();
+                if (!"onBindViewHolder".equals(name) && !"getView".equals(name)) continue;
+                try {
+                    m.setAccessible(true);
+                    XposedBridge.hookMethod(m, new XC_MethodHook() {
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam param) {
+                            try {
+                                if (!isChatAdapter(param.thisObject)) return;
+                                if ("getView".equals(name)) {
+                                    Object pos = param.args.length > 0 ? param.args[0] : null;
+                                    Object row = param.getResult();
+                                    if (!(row instanceof View) || !(pos instanceof Number)) return;
+                                    bind((View) row, msgFromAdapter(param.thisObject,
+                                            ((Number) pos).intValue()));
+                                } else {
+                                    Object holder = param.args.length > 0 ? param.args[0] : null;
+                                    Object pos = param.args.length > 1 ? param.args[1] : null;
+                                    if (holder == null || !(pos instanceof Number)) return;
+                                    View row = holderItemView(holder);
+                                    if (row == null) return;
+                                    Object msg = findMsg(holder, 2);
+                                    if (msg == null) {
+                                        msg = msgFromAdapter(param.thisObject,
+                                                ((Number) pos).intValue());
+                                    }
+                                    bind(row, msg);
+                                }
+                                Status.hit("撤回标记");
+                            } catch (Throwable ignored) {
+                                // 仅外观
+                            }
                         }
-                        bind(row, msg);
-                    } catch (Throwable ignored) {
-                        // 仅外观
-                    }
+                    });
+                    n++;
+                } catch (Throwable ignored) {
+                    // 下一个
                 }
-            });
-        } catch (Throwable ignored) {
-            // 没有这个类就跳过
+            }
         }
+        Log.d(T + "wx adapter hooks=" + n);
+        return n;
+    }
+
+    /**
+     * 只要微信自己声明的那些方法：类层级往上走，遇到 android./androidx./java. 就停。
+     * 这样永远不会把 framework 的公共方法挂上。
+     */
+    private static List<Method> wxMethods(Class<?> c) {
+        List<Method> out = new ArrayList<>();
+        Class<?> k = c;
+        while (k != null && k != Object.class) {
+            String n = k.getName();
+            if (!n.startsWith("com.tencent.")) break;
+            try {
+                Collections.addAll(out, k.getDeclaredMethods());
+            } catch (Throwable ignored) {
+                // 拿不到就继续往上
+            }
+            k = k.getSuperclass();
+        }
+        return out;
     }
 
     /** 这个适配器是不是聊天列表：类名对上锚点即可（字符串比较，开销可以忽略）。 */
     private static boolean isChatAdapter(Object adapter) {
         if (adapter == null) return false;
         String want = adapterName;
-        return want != null && want.equals(adapter.getClass().getName());
+        if (want == null) return false;
+        // 运行期实例可能是锚点类的子类（8.0.x 常见），只比等值会全部漏掉
+        Class<?> k = adapter.getClass();
+        while (k != null && k != Object.class) {
+            if (want.equals(k.getName())) return true;
+            k = k.getSuperclass();
+        }
+        return false;
     }
 
     private static volatile String adapterName;
@@ -381,6 +546,14 @@ final class AntiRecall {
         if (msg == null || !Prefs.onDefault(Prefs.K_RECALL)) return;
         String key = keyOf(msg);
         bound.put(row, key);
+        Long mid = msgIdOf(msg);
+        if (mid != null) boundId.put(row, mid);
+        Boolean byId = mid == null ? null : blockedIds.get(mid);
+        if (byId != null) {
+            // 数据库层拦下的撤回：UI 没收到任何"被撤回"信号，标记只能靠这里补
+            mark(row, byId);
+            return;
+        }
         Boolean self;
         synchronized (recalled) {
             self = recalled.get(key);
@@ -388,6 +561,20 @@ final class AntiRecall {
         // 只给「对方撤回」贴标记：自己撤回微信自己就有「你撤回了一条消息」，
         // 再叠一个标签就成了两个提示打架。
         if (self != null && !self) mark(row, false);
+    }
+
+    /** 取消息对象的 field_msgId（数据库兜底按它匹配）。 */
+    private static Long msgIdOf(Object msg) {
+        if (msg == null) return null;
+        try {
+            Field f = Silent.fieldDeep(msg.getClass(), "field_msgId");
+            if (f == null) return null;
+            Object v = Silent.get(f, msg);
+            if (v instanceof Number) return ((Number) v).longValue();
+        } catch (Throwable ignored) {
+            // 没有这个字段就退化成旧路径
+        }
+        return null;
     }
 
     private static void mark(View row, boolean selfRecall) {
@@ -689,7 +876,7 @@ final class AntiRecall {
     /** 由 Features 在安装前调用：锚点解析一次，后面所有路径复用。 */
     static void prepare() {
         Class<?> msg = Anchors.cls(Anchors.MSG);
-        msgClassName = msg == null ? "com.tencent.mm.storage.e9" : msg.getName();
+        msgClassName = msg == null ? S.WX_P2 : msg.getName();
         Class<?> adapter = Anchors.cls(Anchors.CHAT_ADAPTER);
         adapterName = adapter == null ? null : adapter.getName();
     }

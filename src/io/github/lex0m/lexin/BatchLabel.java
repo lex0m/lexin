@@ -52,6 +52,13 @@ final class BatchLabel {
     private static volatile boolean dbHooked = false;
 
     static void install() {
+        // v1.6 懒挂载：确认配置是关的就不挂（拿不到配置时维持旧行为，免得饿死用户开着的功能）
+        if (Storage.confident() && !Prefs.onDefault(Prefs.K_BATCH_LABEL)) {
+            Status.armed("批量分类标签", 0);
+            Status.note("批量分类标签", "未开启（默认关，开了重启微信才挂）");
+            return;
+        }
+
         cMmKernel = Anchors.cls(Anchors.MM_KERNEL);
         cCoreStorage = Anchors.cls(Anchors.CORE_STORAGE);
         cSqliteDbWrapper = Anchors.cls(Anchors.SQLITE_DB_WRAPPER);

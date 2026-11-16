@@ -24,7 +24,7 @@ import java.io.File;
  */
 final class WxAccount {
 
-    private static final String HOST_PREFS = "com.tencent.mm_preferences";
+    private static final String HOST_PREFS = S.WX_P19;
     private static final String K_NICK = "last_login_nick_name";
     private static final String K_WXID = "login_weixin_username";
     private static final String K_ALIAS = "last_login_alias";

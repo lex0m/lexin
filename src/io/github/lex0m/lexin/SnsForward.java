@@ -66,7 +66,7 @@ final class SnsForward {
 
     static void install() {
         try {
-            Class<?> c = Class.forName("com.tencent.mm.ui.tools.ShareImgUI", false, Features.loader);
+            Class<?> c = Class.forName(S.WX_P15, false, Features.loader);
             XposedBridge.hookAllMethods(c, "onDestroy", new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam p) {
@@ -321,7 +321,9 @@ final class SnsForward {
     private static File findRecentVideo() {
         File best = null;
         long now = System.currentTimeMillis();
-        for (String base : new String[]{"/data/data/com.tencent.mm/cache", "/data/user/0/com.tencent.mm/cache"}) {
+        String own = Features.app == null ? "" : (Features.app.getDataDir().getAbsolutePath() + "/cache");
+        for (String base : new String[]{own}) {
+            if (base.isEmpty()) break;
             File root = new File(base);
             File[] accts = root.listFiles();
             if (accts == null) continue;
@@ -569,7 +571,7 @@ final class SnsForward {
         Intent i = new Intent(Intent.ACTION_SEND);
         i.setType("text/plain");
         i.putExtra(Intent.EXTRA_TEXT, text);
-        i.setClassName("com.tencent.mm", "com.tencent.mm.ui.tools.ShareImgUI");
+        i.setClassName(Entry.HOST, S.WX_P15);
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         return i;
     }
@@ -602,7 +604,7 @@ final class SnsForward {
         Intent i = new Intent(Intent.ACTION_SEND_MULTIPLE);
         i.setType("image/png");
         i.putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris);
-        i.setClassName("com.tencent.mm", "com.tencent.mm.ui.tools.ShareImgUI");
+        i.setClassName(Entry.HOST, S.WX_P15);
         i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
         return i;
     }
@@ -631,7 +633,7 @@ final class SnsForward {
             Intent i = new Intent(Intent.ACTION_SEND);
             i.setType("video/mp4");
             i.putExtra(Intent.EXTRA_STREAM, uri);
-            i.setClassName("com.tencent.mm", "com.tencent.mm.ui.tools.ShareImgUI");
+            i.setClassName(Entry.HOST, S.WX_P15);
             i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
             return i;
         } catch (Throwable t) {

@@ -77,11 +77,33 @@ public final class Entry implements IXposedHookLoadPackage, IXposedHookZygoteIni
                         @Override
                         protected void afterHookedMethod(MethodHookParam param) {
                             try {
-                                Features.install((Context) param.args[0], lp.classLoader);
+                                // ★ 必须是 param.thisObject（Application 本体）。
+                                //   attach 阶段 LoadedApk.mApplication 还没赋值，
+                                //   context.getApplicationContext() 返回 null —— v1.6.0 及之前
+                                //   一直拿的是 null，导致 Storage/Prefs/状态推送全在跑默认值。
+                                Features.install((Context) param.thisObject, lp.classLoader);
                             } catch (Throwable ignored) {
                                 // 静默
                             }
                             alive(android.app.Application.getProcessName());
+                        }
+                    });
+
+            // Tinker 在 attachBaseContext 之后才把补丁 dex 挂上（DelegateLastClassLoader）。
+            // onCreate 是更早于"首个 Activity"的可靠时点：在这里再采纳一次运行时 loader，
+            // 后台（没有 Activity）的收消息路径也能挂到真正执行的类上。
+            XposedHelpers.findAndHookMethod(Application.class, "onCreate",
+                    new XC_MethodHook() {
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam p) {
+                            try {
+                                ClassLoader tcl = Thread.currentThread().getContextClassLoader();
+                                if (tcl != null) Features.adoptLoader(tcl);
+                                Features.adoptLoader(
+                                        ((Context) p.thisObject).getClass().getClassLoader());
+                            } catch (Throwable ignored) {
+                                // 采纳失败就等首个 Activity
+                            }
                         }
                     });
         } catch (Throwable ignored) {

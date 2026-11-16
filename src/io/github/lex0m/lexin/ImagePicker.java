@@ -22,7 +22,7 @@ final class ImagePicker {
     private static final int REQ = 0x5C01;      // our request code
 
     /** Where picked images live. */
-    static final String DIR = "/sdcard/Android/data/com.tencent.mm/files/mm_res";
+    static final String DIR = S.WX_P16;
     private static final String CHAT_NAME = "user_chat_bg.img";
     private static final String HOME_NAME = "user_home_bg.img";
 
@@ -125,24 +125,39 @@ final class ImagePicker {
             //   模块进程（设置页）→ 直接写自己的 files/
             // 老版本宿主侧写的是 host.getFilesDir()，等于把一张 1.4MB 的陌生图放进微信沙箱。
             boolean card = Beautify.K_CARD_IMG.equals(which);
-            android.net.Uri dst = BgProvider.uriOf(card ? BgProvider.PATH_CARD : BgProvider.PATH_BG);
-            java.io.OutputStream os;
-            if (Storage.isHostSide()) {
-                os = host.getContentResolver().openOutputStream(dst);
-            } else {
-                os = new java.io.FileOutputStream(
-                        card ? BgProvider.cardFile(host) : BgProvider.file(host), false);
-            }
-            if (os == null) {
-                toast(host, "保存失败");
-                return;
-            }
             long written = 0;
-            byte[] buf = new byte[16384];
-            int n;
-            while ((n = in.read(buf)) > 0) { os.write(buf, 0, n); written += n; }
-            os.close();
-            in.close();
+            java.io.OutputStream os = null;
+            try {
+                if (Storage.isHostSide()) {
+                    // 面板跑在微信进程里：先试 provider（模块侧落盘，微信目录不留文件）。
+                    // 但微信 targetSdk 34 又没有 QUERY_ALL_PACKAGES，解析不到模块包的 authority
+                    // （实测 IllegalArgumentException: Unknown authority）⇒ 退到写微信自己的
+                    // files 目录（点号文件），Beautify 读图时优先读它。功能可用优先于零痕迹。
+                    try {
+                        os = host.getContentResolver().openOutputStream(
+                                BgProvider.uriOf(card ? BgProvider.PATH_CARD : BgProvider.PATH_BG));
+                        Log.d(T + "saving via provider");
+                    } catch (Throwable t) {
+                        os = null;
+                        Log.d(T + "provider unavailable: " + t.getClass().getSimpleName());
+                    }
+                    if (os == null) {
+                        os = new java.io.FileOutputStream(
+                                new java.io.File(host.getFilesDir(),
+                                        card ? Beautify.CARD_FILE : Beautify.BG_FILE), false);
+                        Log.d(T + "saving to host files");
+                    }
+                } else {
+                    os = new java.io.FileOutputStream(
+                            card ? BgProvider.cardFile(host) : BgProvider.file(host), false);
+                }
+                byte[] buf = new byte[16384];
+                int n;
+                while ((n = in.read(buf)) > 0) { os.write(buf, 0, n); written += n; }
+            } finally {
+                try { if (os != null) os.close(); } catch (Throwable ignored) { }
+                try { in.close(); } catch (Throwable ignored) { }
+            }
             if (written <= 0) {
                 toast(host, "保存失败");
                 return;

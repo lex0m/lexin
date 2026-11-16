@@ -109,6 +109,25 @@ if [ "$DEBUG_BUILD" = "1" ]; then DBG=true; else DBG=false; fi
 printf 'package io.github.lex0m.lexin;\n\nfinal class BuildFlags {\n    static final boolean DEBUG = %s;\n    static final String VERSION = "%s";\n}\n' \
     "$DBG" "$VER" > "$B/gen-src/io/github/lex0m/lexin/BuildFlags.java"
 
+# 锚点表密钥：由**源码指纹**派生（编译期注入成 int[]，静态扫不出明文类名）。
+# 以前每次构建用 secrets 随机，导致同一份源码两次构建的 anchor.bin / AnchorKey / classes.dex
+# 全都不一样 → VERSIONS.md 记的哈希永远对不上、也没法验证「这个包是不是这份源码构建的」。
+# 改成确定性派生后：源码不变 ⇒ 包不变；源码变了 ⇒ 密钥自动变。
+# 盐存在 keystore/anchor.salt（不进 APK）。不能用 buildId 单独派生：
+# build-info.txt 就在包里，谁拿到包都能算出密钥，等于没加密。
+SALT=$W/keystore/anchor.salt
+[ -f "$SALT" ] || "$PY" -c 'import secrets,sys;open(sys.argv[1],"w").write(secrets.token_hex(32))' "$SALT"
+AK=$("$PY" -c '
+import hashlib,sys
+sys.path.insert(0, sys.argv[1])
+from buildmeta import source_digest
+salt = open(sys.argv[3], encoding="utf-8").read().strip()
+bid,_ = source_digest(sys.argv[2])
+print(hashlib.sha256(("lexin-anchor:"+salt+":"+bid).encode()).hexdigest()[:32])
+' "$W/tools" "$W" "$SALT")
+"$PY" "$W/tools/gen-anchorkey.py" "$B/gen-src/io/github/lex0m/lexin/AnchorKey.java" "$AK"
+export LEXIN_ASSET_KEY="$AK"
+
 echo "[1/7] aapt2 compile resources"
 "$AAPT2" compile --dir "$W/res" -o "$B/res.zip"
 

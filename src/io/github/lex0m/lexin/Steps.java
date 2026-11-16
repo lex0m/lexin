@@ -54,6 +54,14 @@ final class Steps {
             Log.d(T + "skip: not main process");
             return;
         }
+        // v1.6 懒挂载：开关没开就一个 hook 都不挂。
+        // 运动步数默认关，以前的写法是"照挂不误、回调里再判断开关"—— 等于给每个用户都装上了
+        // 一组用不到的 hook（其中还有 framework 的 SystemSensorManager），纯增检测面。
+        if (!Prefs.onDefault(K_ON)) {
+            Status.armed("运动步数", 0);
+            Status.note("运动步数", "未开启（默认关，开了重启微信才挂）");
+            return;
+        }
         int wxLevel = hookWeChatSteps();     // 首选：微信自己算出来的"今天步数"（各家 provider 它自己处理了）
         int sensorLevel = hookSensorLayer(); // 兜底：框架传感器层
         boolean any = wxLevel + sensorLevel > 0;
@@ -175,7 +183,8 @@ final class Steps {
             eventSensor = findField(SensorEvent.class, "sensor");
             if (sensorsEvents == null || eventSensor == null) return 0;
             sensorsEvents.setAccessible(true);
-            XposedBridge.hookAllMethods(queue, "dispatchSensorEvent", new XC_MethodHook() {
+            java.util.Set<XC_MethodHook.Unhook> un =
+                    XposedBridge.hookAllMethods(queue, "dispatchSensorEvent", new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) {
                     try {
@@ -196,7 +205,8 @@ final class Steps {
                     }
                 }
             });
-            return 1;
+            // 返回空集合 = 一个重载都没挂上（签名变了），不能算成功
+            return un == null || un.isEmpty() ? 0 : un.size();
         } catch (Throwable t) {
             Log.d(T + "framework hook failed: " + t.getClass().getSimpleName());
             return 0;

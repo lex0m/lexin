@@ -17,8 +17,8 @@ final class Limits {
         int n = 0;
 
         n += widenMethod(cl, "qr.z", "a");
-        n += widenMethod(cl, "com.tencent.mm.ui.chatting.adapter.k", "Z0");
-        n += widenField(cl, "com.tencent.mm.plugin.textstatus.ui.TextStatusDoWhatActivityV2", "p1");
+        n += widenMethod(cl, S.WX_P10, "Z0");
+        n += widenField(cl, S.WX_P7, "p1");
 
         Status.set("放宽本地限制", n > 0);
         Status.note("放宽本地限制", n > 0 ? "已放宽 " + n + " 处上限" : "当前微信版本未适配（类名已变）");
@@ -66,20 +66,22 @@ final class Limits {
             if (f == null || f.getType() != int.class) return 0;
             // 字段没法 hook，改成在类加载时固定住
             final Field target = f;
-            XposedBridge.hookAllConstructors(c, new XC_MethodHook() {
+            java.util.Set<XC_MethodHook.Unhook> un =
+                    XposedBridge.hookAllConstructors(c, new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam p) {
                     try {
                         if (!Prefs.onDefault(Prefs.K_LIMITS)) return;
                         if (((Integer) target.get(p.thisObject)) < WIDE) {
                             target.set(p.thisObject, WIDE);
+                            Status.hit("放宽本地限制");
                         }
                     } catch (Throwable ignored) {
                         // 忽略
                     }
                 }
             });
-            return 1;
+            return un == null || un.isEmpty() ? 0 : 1;
         } catch (Throwable ignored) {
             return 0;
         }

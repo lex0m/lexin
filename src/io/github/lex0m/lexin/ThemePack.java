@@ -18,9 +18,7 @@ final class ThemePack {
 
     /** 主题包存放位置（按优先级；微信外部文件目录是宿主唯一能自由读取的地方）。 */
     static final String[] DIRS = {
-            "/sdcard/Android/data/com.tencent.mm/files/mm_res",
-            "/storage/emulated/0/Android/data/com.tencent.mm/files/mm_res",
-            "/sdcard/Android/data/com.tencent.mm/files/.res",
+            S.WX_P16, S.WX_P17, S.WX_P18,
     };
     /** Kept for the UI: the directory a user should actually use. */
     static final String DIR = DIRS[0];
@@ -60,16 +58,19 @@ final class ThemePack {
                 if (stamp == loadedAt) return;
                 loadedAt = stamp;
                 images.clear();
+                miss.clear();
                 colourCache.clear();
                 if (stamp < 0) {
                     config = null;
                     return;
                 }
                 StringBuilder sb = new StringBuilder();
-                BufferedReader r = new BufferedReader(new FileReader(f));
-                String line;
-                while ((line = r.readLine()) != null) sb.append(line).append('\n');
-                r.close();
+                // try-with-resources：之前 readLine/JSONObject 一抛异常，这个 fd 就永远不关，
+                // 而 ensureLoaded 是所有主题热路径的必经之路 ⇒ 最终 "Too many open files" 崩微信。
+                try (BufferedReader r = new BufferedReader(new FileReader(f))) {
+                    String line;
+                    while ((line = r.readLine()) != null) sb.append(line).append('\n');
+                }
                 config = new JSONObject(sb.toString());
                 XposedBridgeLog(T + "pack loaded: " + name());
             }
@@ -143,17 +144,29 @@ final class ThemePack {
 
     // ── images ───────────────────────────────────────────────────────────────
 
-    /** 按宿主短资源名解析主题素材，包根和 images/ 子目录都查。 */
+    /** 解析过但确实没有素材的资源名（负缓存）：避免每次 setImageResource 都去探盘。 */
+    private static final java.util.Set<String> miss = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /**
+     * 按宿主短资源名解析主题素材，包根和 images/ 子目录都查。
+     *
+     * v1.6.2：
+     *   · 加负缓存。主题包里没覆盖的资源是绝大多数，以前每次 setImageResource 都要走
+     *     4 个扩展名 × 2 个根目录的 isFile/canRead + ZipFile.getEntry，滑动明显发涩。
+     *   · 返回**新实例**。Drawable 是有状态的（bounds / callback），同一个实例塞给多个
+     *     ImageView 会互相抢 bounds，表现为图标尺寸跳变、偶发错图，还会让旧界面回收不掉。
+     */
     static Drawable image(String shortName) {
         if (shortName == null || shortName.isEmpty()) return null;
+        if (miss.contains(shortName)) return null;
         Drawable cached = images.get(shortName);
-        if (cached != null) return cached;
+        if (cached != null) return copy(cached);
 
         // 1) 直接从模块 APK 读——磁盘上不留东西，这正是把素材打进 APK 的意义。
         Drawable fromApk = Assets.drawable(shortName);
         if (fromApk != null) {
             images.put(shortName, fromApk);
-            return fromApk;
+            return copy(fromApk);
         }
 
         // 2) 回退：用户自己放的文件，只有刻意放进去时才用（会留下文件，权衡后保留）。
@@ -173,7 +186,7 @@ final class ThemePack {
                         Drawable d = Drawable.createFromPath(f.getAbsolutePath());
                         if (d != null) {
                             images.put(shortName, d);
-                            return d;
+                            return copy(d);
                         }
                     }
                 }
@@ -181,7 +194,26 @@ final class ThemePack {
         } catch (Throwable ignored) {
             // 继续往下
         }
+        miss.add(shortName);
         return null;
+    }
+
+    /** 复制一个 Drawable 实例（ConstantState 共享像素，不额外占内存）。 */
+    private static Drawable copy(Drawable d) {
+        try {
+            if (d == null) return null;
+            Drawable.ConstantState cs = d.getConstantState();
+            if (cs != null) {
+                Drawable n = cs.newDrawable();
+                if (n != null) {
+                    n.setAlpha(d.getAlpha());
+                    return n;
+                }
+            }
+        } catch (Throwable ignored) {
+            // 复制失败就退回原实例（比没有强）
+        }
+        return d;
     }
 
     /** A path referenced from the config (e.g. a background or font file). */

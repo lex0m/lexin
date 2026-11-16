@@ -31,6 +31,27 @@ final class CfgBus {
     static final String FULL = "x.f";
     /** 微信 → 模块：改一项。 */
     static final String PUT = "x.p";
+    /**
+     * 微信 → 模块：适配状态镜像（面板读的那份 status.txt）。
+     *
+     * v1.5 修：这条以前走的是 BgProvider 的 call()，而微信看不见模块包
+     * （targetSdk 34 且没有 QUERY_ALL_PACKAGES）⇒ Unknown authority ⇒ 异常被吞，
+     * 于是面板状态从 v1.4 起就没再更新过（status.txt 一直停在旧时间）。
+     */
+    static final String STATUS = "x.s";
+
+    /**
+     * 模块侧接收器的组件名。
+     *
+     * v1.5.1 修：只给 action + setPackage 的**隐式**广播在本机解析不到接收器
+     * （实测 `am broadcast -a x.s -p io.github.lex0m.lexin` → result=0 无人接收，
+     * 改成 `-n io.github.lex0m.lexin/.CfgReceiver` 立刻写盘）⇒ 配置同步从 v1.4 起
+     * 其实一直是断的。显式指定组件后不再依赖系统的隐式广播解析。
+     */
+    private static final String RECV = "io.github.lex0m.lexin.CfgReceiver";
+
+    /** 防伪 MAC（见 {@link Sig}）：第三方 App 算不出来，伪造的广播直接丢。 */
+    static final String EXTRA_SIG = "g";
 
     static final String EXTRA_KV = "k";
     static final String EXTRA_KEY = "a";
@@ -42,6 +63,15 @@ final class CfgBus {
      * 微信侧：注册动态接收器，拿到全量就写进 Storage 的内存镜像；同时发一次 REQ。
      * 只允许在微信进程调用。
      */
+    /** 全量载荷：发送方与接收方用同一份拼法，否则 MAC 对不上。 */
+    static String payloadFull(java.util.List<String> kv) {
+        StringBuilder sb = new StringBuilder(FULL);
+        if (kv != null) {
+            for (String line : kv) sb.append('|').append(line == null ? "" : line);
+        }
+        return sb.toString();
+    }
+
     static void watchHost(Context ctx) {
         if (armed || ctx == null) return;
         armed = true;
@@ -53,7 +83,11 @@ final class CfgBus {
                         if (i == null || !FULL.equals(i.getAction())) return;
                         java.util.ArrayList<String> kv = i.getStringArrayListExtra(EXTRA_KV);
                         if (kv == null) return;
+                        if (!Sig.ok(payloadFull(kv), i.getStringExtra(EXTRA_SIG))) return;   // 伪造的丢弃
                         Storage.applyRemote(kv);
+                        // 配置是异步到的，Features 里那次 Log.setRuntime(Storage.diag())
+                        // 永远读到默认值（广播还没回来）。这里补一次，诊断开关才真的能开。
+                        Log.setRuntime(Storage.diag());
                     } catch (Throwable ignored) {
                         // 接收器里绝不抛
                     }
@@ -77,8 +111,8 @@ final class CfgBus {
         if (ctx == null) return;
         try {
             Intent i = new Intent(REQ);
-            i.setPackage(Entry.MODULE);
-            ctx.sendBroadcast(i);
+            i.putExtra(EXTRA_SIG, Sig.of(REQ));
+            ctx.sendBroadcast(toModule(i));
         } catch (Throwable ignored) {
             // 模块没装/被禁：拿不到就用默认值
         }
@@ -88,13 +122,26 @@ final class CfgBus {
     static void putRemote(Context ctx, String key, String encoded) {
         if (ctx == null || key == null) return;
         try {
-            Intent i = new Intent(PUT);
-            i.setPackage(Entry.MODULE);
+            Intent i = toModule(new Intent(PUT));
             i.putExtra(EXTRA_KEY, key);
             i.putExtra(EXTRA_VAL, encoded);
+            i.putExtra(EXTRA_SIG, Sig.of(PUT + "|" + key + "|" + encoded));
             ctx.sendBroadcast(i);
         } catch (Throwable ignored) {
             // 发不出去就只在本次会话生效
+        }
+    }
+
+    /** 微信侧：把适配状态推给模块进程落盘（面板读 status.txt）。 */
+    static void pushStatus(Context ctx, String text) {
+        if (ctx == null || text == null || text.isEmpty()) return;
+        try {
+            Intent i = toModule(new Intent(STATUS));
+            i.putExtra(EXTRA_VAL, text);
+            i.putExtra(EXTRA_SIG, Sig.of(STATUS + "|" + text));
+            ctx.sendBroadcast(i);
+        } catch (Throwable ignored) {
+            // 推不动就只在微信进程内有效（面板看不到，功能不受影响）
         }
     }
 
@@ -109,10 +156,18 @@ final class CfgBus {
             Intent i = new Intent(FULL);
             i.setPackage(Entry.HOST);
             i.putStringArrayListExtra(EXTRA_KV, kv);
+            i.putExtra(EXTRA_SIG, Sig.of(payloadFull(kv)));
             ctx.sendBroadcast(i);
         } catch (Throwable ignored) {
             // 推不动不影响模块侧自身
         }
+    }
+
+    /** 微信 → 模块：一律显式组件，免得被系统的隐式广播解析/ROM 管控吞掉。 */
+    private static Intent toModule(Intent i) {
+        i.setClassName(Entry.MODULE, RECV);
+        i.addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES);
+        return i;
     }
 
     private CfgBus() {}

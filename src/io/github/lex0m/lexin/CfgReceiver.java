@@ -22,17 +22,30 @@ public class CfgReceiver extends BroadcastReceiver {
             if (context == null || intent == null) return;
             String a = intent.getAction();
             if (a == null) return;
-            android.util.Log.e("pb", "recv " + a);
             Storage.init(context);
             if (CfgBus.REQ.equals(a)) {
+                if (!Sig.ok(a, intent.getStringExtra(CfgBus.EXTRA_SIG))) return;   // 只认本包私钥
                 CfgBus.pushAll(context, Storage.snapshot());
             } else if (CfgBus.PUT.equals(a)) {
                 String k = intent.getStringExtra(CfgBus.EXTRA_KEY);
                 String v = intent.getStringExtra(CfgBus.EXTRA_VAL);
                 if (k == null || v == null) return;
+                if (!Sig.ok(a + "|" + k + "|" + v, intent.getStringExtra(CfgBus.EXTRA_SIG))) return;
                 Storage.putEncoded(k, v);
-                android.util.Log.e("pb", "stored " + k + "=" + v + " cfg=" + new java.io.File(context.getFilesDir(), ".cfg").length());
                 CfgBus.pushAll(context, Storage.snapshot());
+            } else if (CfgBus.STATUS.equals(a)) {
+                // 微信侧推来的适配状态：原样落盘，面板读的时候零解析
+                String s = intent.getStringExtra(CfgBus.EXTRA_VAL);
+                if (s == null || s.isEmpty()) return;
+                if (!Sig.ok(a + "|" + s, intent.getStringExtra(CfgBus.EXTRA_SIG))) return;
+                java.io.File f = new java.io.File(context.getFilesDir(), "status.txt");
+                java.io.FileOutputStream fo = new java.io.FileOutputStream(f);
+                try {
+                    fo.write(s.getBytes("UTF-8"));
+                    fo.flush();
+                } finally {
+                    fo.close();
+                }
             }
         } catch (Throwable ignored) {
             // 接收器里绝不抛：抛出去会让系统判成 ANR

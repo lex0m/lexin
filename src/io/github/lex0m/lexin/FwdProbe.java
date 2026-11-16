@@ -27,7 +27,7 @@ final class FwdProbe {
         }
         // ③ 长按菜单构造：把调用栈里出现过的微信类名打出来，用来定位菜单挂点
         try {
-            Class<?> menu = Class.forName("com.tencent.mm.ui.chatting.component.a1", false, Features.loader);
+            Class<?> menu = Class.forName(S.WX_P9, false, Features.loader);
             for (final Method m : menu.getDeclaredMethods()) {
                 if (m.getParameterCount() != 0 || m.getReturnType() != int.class) continue;
                 m.setAccessible(true);

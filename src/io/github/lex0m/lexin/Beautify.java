@@ -421,7 +421,7 @@ final class Beautify {
         }
 
         // 临时测量手段：之前三次都靠猜微信用了什么，这次直接 dump 事实（类名/尺寸/真实背景类型）。
-        if (Storage.on(K_DUMP, false)) {
+        if (BuildFlags.DEBUG && Storage.on(K_DUMP, false)) {
             try {
                 StringBuilder sb = new StringBuilder();
                 dumpTree(decor, 0, sb);
@@ -503,7 +503,7 @@ final class Beautify {
 
     /** 按帧写出列表真实的行结构（类名/尺寸/背景类型/边距），供按事实改代码，不靠猜 */
     private static void dumpListOnce(View list) {
-        if (list == null || !Storage.on(K_DUMP, false)) return;
+        if (list == null || !BuildFlags.DEBUG || !Storage.on(K_DUMP, false)) return;
         long now = System.currentTimeMillis();
         int seq;
         synchronized (Beautify.class) {
@@ -612,51 +612,28 @@ final class Beautify {
         }
     }
 
-    /** 解码并准备壁纸层。模糊用「大比例降采样再放大」实现，屏幕尺寸下与逐像素处理没差别，且不占每帧开销。 */
-    /**
-     * 设置页（模块 App）里选的背景图落在模块自己的私有目录，宿主进程读不到。
-     * 这里通过 BgProvider 拉一份到宿主目录（一次性），之后照旧走缓存逻辑。
-     */
-    private static boolean pullBackground(File dst) {
-        try {
-            android.content.Context ctx = Features.app;
-            if (ctx == null) return false;
-            java.io.InputStream in = ctx.getContentResolver().openInputStream(BgProvider.uri());
-            if (in == null) return false;
-            java.io.FileOutputStream os = new java.io.FileOutputStream(dst, false);
-            try {
-                byte[] buf = new byte[16384];
-                int n;
-                while ((n = in.read(buf)) > 0) os.write(buf, 0, n);
-            } finally {
-                try { in.close(); } catch (Throwable ignored) { }
-                try { os.close(); } catch (Throwable ignored) { }
-            }
-            return dst.length() > 0;
-        } catch (Throwable t) {
-            return false;
-        }
-    }
 
     /**
      * 老版本把背景图写在微信 files/ 里（实测 1.4MB），v1.5 起改存模块侧。
      * 迁移时**先写回模块侧再删本地**，否则用户刚删完背景就没了。
      */
-    private static void pushLegacyToProvider(File legacy) {
+    private static boolean pushLegacyToProvider(File legacy) {
         java.io.InputStream in = null;
         java.io.OutputStream out = null;
         try {
             android.content.Context ctx = Features.app;
-            if (ctx == null) return;
+            if (ctx == null) return false;
             out = ctx.getContentResolver().openOutputStream(BgProvider.uri());
-            if (out == null) return;
+            if (out == null) return false;
             in = new java.io.FileInputStream(legacy);
             byte[] buf = new byte[16384];
             int n;
             while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
             out.flush();
+            return true;
         } catch (Throwable ignored) {
             // 搬不动就先留着本地文件，下次再搬
+            return false;
         } finally {
             try { if (in != null) in.close(); } catch (Throwable ignored) { }
             try { if (out != null) out.close(); } catch (Throwable ignored) { }
@@ -714,8 +691,10 @@ final class Beautify {
                 File legacy = new File(dir, BG_FILE);
                 if (legacy.isFile() && legacy.length() > 0) {
                     src = BitmapFactory.decodeFile(legacy.getAbsolutePath(), opts);
-                    if (src != null) pushLegacyToProvider(legacy);   // 先搬回模块侧，再删本地
-                    legacy.delete();
+                    // 本地文件是**主路径**，不再往上搬：微信 targetSdk 34 + 没有
+                    // QUERY_ALL_PACKAGES，解析不到模块 provider 的 authority，
+                    // 搬移必然失败。以前失败也照样 delete() ⇒ 用户的背景图直接没了。
+                    // 现在：读得到就用，文件留在微信自己的 files/ 里（点号开头，不进相册）。
                 }
             } catch (Throwable ignored) {
                 // 老文件读不出来就走 provider
@@ -817,7 +796,9 @@ final class Beautify {
                         setBackgroundSafely(v, new TopBandDrawable(part, band, 0, bandColour));
                     } else {
                         // 一律用我们自己的类，绝不用 BitmapDrawable：微信自己的层也用它，「是不是我画的」就分不清（这条规则已被违反过两次）。
-                        setBackgroundSafely(v, new BarDrawable(part));
+                        BarDrawable bd = new BarDrawable(part);
+                        barCache.put(v, bd);            // 补缓存：下面「微信重设背景 → 贴回切片」那条自愈要用
+                        setBackgroundSafely(v, bd);
                     }
                     painted.put(v, Boolean.TRUE);
                     budget[0]--;
@@ -1327,7 +1308,7 @@ final class Beautify {
 
     /** 按帧写出整页视图树：只看列表子树看不到破坏壁纸的层（它们在列表之上） */
     private static void dumpPageOnce(View root) {
-        if (root == null || !Storage.on(K_DUMP, false)) return;
+        if (root == null || !BuildFlags.DEBUG || !Storage.on(K_DUMP, false)) return;
         long now = System.currentTimeMillis();
         int seq;
         synchronized (Beautify.class) {
@@ -1959,13 +1940,14 @@ final class Beautify {
             int dh = dp(row, clamp(Storage.num(K_CARD_H, 0), -24, 48));
             if (dh == 0) return;
             ViewGroup.LayoutParams lp = row.getLayoutParams();
-            if (lp == null || lp.height != ViewGroup.LayoutParams.WRAP_CONTENT
-                    && lp.height <= 0) {
-                // 只有高度确定的行才能安全缩放
-            }
+            if (lp == null) return;
+            // 只调「已经是固定高度」的行。以前那个守卫是个**空 if 块**，等于没判：
+            // WRAP_CONTENT(-2) 也会被下面的逻辑改写成测量出来的绝对像素，
+            // 多行文本从此不会自己长高 → 被截断，换字体重排也失效。
+            if (lp.height <= 0) return;
             Integer orig = origHeights.get(row);
             if (orig == null) {
-                int h = row.getHeight() > 0 ? row.getHeight() : lp.height;
+                int h = lp.height;
                 if (h <= 0) return;
                 orig = h;
                 origHeights.put(row, orig);

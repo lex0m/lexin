@@ -1,27 +1,72 @@
-v1.5.0：适配微信 8.0.80 + 环境隐蔽三道探针
+v1.6.2：全盘复审 —— 自检复活 + 背景图通道 + 构建可复现
 
-兼容微信 8.0.80（3220）
-- 锚点表补 8.0.80，35 个槽位全中（旧版 32）；8.0.72 ~ 8.0.79 原表保留
-- 小程序开屏广告判定在 8.0.80 从 K2 改名 N2、类从 f7 换到 g7：槽位改为按方法内日志特征
-  （checkCanShowAd）定位，表里直接记「类#方法」，AdBlock 优先用表里的方法名，旧版才回落 K2
-- 其余命中：sysmsg_parser → platformtools.ja、msg → storage.f9、撤回绑定器 jo.b、ad_open → gd1.j
+这一版没有新功能。把 v1.6.0/1.6.1 那套「判据」重读了一遍，专找三种病：
+装上了但面板说好了却不工作、会让微信卡崩、会悄悄丢数据。复审查出 62 条，
+逐条对代码验证后修了 21 条，其余列进「已知未修」。
 
-隐蔽性（本轮重点）
-- 栈帧自检：TinkerCrashProtect 遍历调用栈找 de.robv…XposedBridge（app.j3#a）→ 恒返回 false
-- Matrix checkHook：对 libwechatcrash / libwxperf-tkill / libtrace-canary 的 native 自查
-  （pv0.u0#a）→ 整个方法体跳过，不自查
-- 包名自证：服务端 ClientCheckGetAppList 会让客户端上报已装应用 → 查询结果里剔除本模块，
-  单独查本模块时答「没这个包」
-- Stealth 从启动后 1.2 秒的延后队列提到最早期（前两道在启动阶段就可能跑过一次，晚装等于没装）
-- 隐蔽开关默认开（K_STEALTH）；面板新增「环境隐蔽」一行报各探针挂载数
-- client_check（w41.u#j7）只定位不拦：那是 sysmsg 的总分发口，拦了会把撤回一起废掉
+【两个阻断】
 
-配置总线（v1.5 重构，本轮一并入库）
-- CfgBus + CfgReceiver：微信进程 ⇄ 模块进程走两条短 action 的广播，不再往微信自己的 prefs 写
-- Storage 重写：唯一数据源是模块私有目录 .cfg（XOR 混淆），微信进程只读内存镜像、零落盘
-- 面板 / 设置页 / 外观页三处读写收敛到同一套 API
+1. 自检机制自己就是坏的。SelfCheck 用 Probe.class.getDeclaredMethod("pulse") 找方法，
+   但 R8 把 pulse 改名成了 le（mapping.txt: void pulse() -> le）——
+   发布包里这句必然抛 NoSuchMethodException。
+   真机证据：status.txt 里 hook 活性 armed=1 / hits=0，37 分钟一次没涨
+   （自检是 15 秒一次，该有 148 次）。
+   修法：不按名字找，按签名找（static void、零参数、声明在 Probe 里）—— R8 改不了签名。
 
-其它
-- 版本 1.5.0（versionCode 27）
-- dist/lexin.apk 更新为 1.5.0（653,526 B，sha256 3ee568a8ffdca9be961c5c78c702b68ca39679495b8baf891abbcc9307b443d8）
-- 新增 更新说明-v1.5.0.md；VERSIONS.md 追加 v1.5.0；README 徽章 / 微信版本表 / 更新日志
+2. 面板「重新自动适配」从来不扫。Anchors.forget() 第一件事是 AutoScan.reset()，
+   把 unresolved 清空 → 紧接着 schedule() 看到空表直接 return，一次扫描都不发生，
+   但 toast 照样说"已开始重新适配"。
+   修法：reset 之后把所有有规则可扫的槽位重新登记。
+
+【高危 7 条】
+
+- ForwardPlus.hookMenuSelect 挑方法不校验返回类型就 setResult(null)：
+  getDeclaredMethods 顺序不保证，挑中 (MenuItem)->boolean 的重载会拆箱 null → NPE 崩微信。
+- 两处 ViewOutlineProvider.getOutline 没有 try/catch：框架在渲染线程调，
+  首次布局前是 0×0，setRoundRect 抛 IllegalArgumentException 直接漏进微信绘制流程。
+- Beautify.applyCardHeight 的守卫是空 if 块：WRAP_CONTENT 被改写成绝对像素，
+  多行文本从此不会自己长高、被截断。
+- 背景图链路三处全走 content://io.github.lex0m.lexin.bg，而微信 targetSdk 34
+  且没有 QUERY_ALL_PACKAGES（已用 dumpsys 核实 queriesPackages 里没有本模块）
+  ⇒ 面板选图必"保存失败"、背景永远画不出来。
+  修法：写侧先试 provider、失败写微信 files/ 点号文件；读侧本地文件为主路径。
+- 老背景图迁移失败也照 delete()：用户的背景图直接消失。现在只在真搬成功时删。
+- ThemePack.ensureLoaded 的 FileReader 无 try/finally：主题 JSON 坏一次就漏一个 fd，
+  最终 "Too many open files" 崩微信。
+- ThemePack.image() 把同一个 Drawable 实例塞给多个 ImageView：bounds/callback 互抢，
+  图标尺寸跳变、偶发错图、旧界面回收不掉。改成 constantState.newDrawable() 副本。
+
+【中危 7 条】
+- 旧配置迁移按 ap_+hashCode 拼键，而 v1.5.1 写的是 ap_+字节hex → 认不出后又被一律 remove，
+  升级即丢配置。改成先用 prefLogical 反解再迁。
+- Storage.mem 是普通 HashMap，读路径无锁 + 写路径 clear+put ⇒ 并发读到半张空表、配置回默认。
+- EmojiGame 把菜单下标直接当宿主取值，FIST_ORDER 定义了从没用过：猜拳石头/布错位、
+  骰子整体偏移一格。按 v1.3 实现改回。
+- 面板广播 action 解出来是微信自己的 com.tencent.mm.ui.intent.ACTION_MM_UI_HINT，
+  任意外部 App 一条广播就能弹我们的全屏面板。换成私有短串 x.b 并加 MAC。
+- ThemePack.image() 无负缓存：未命中的资源每次都要探 4 个扩展名 × 2 个根目录。
+- barCache 有读无写：「微信重设背景后贴回切片」那条自愈是死代码。
+- Anchors.resolve() 在锁内做 N×M 次 Class.forName（本轮未改，见已知未修）。
+
+【构建可复现】
+上一版 VERSIONS.md 记的 v1.6.1 是 e0ead57f…，实际产物是 435d0a42…。
+不是手误 —— 同一份源码连编三次，三个哈希。根因是 build.sh 每次用 secrets 随机生成
+锚点表密钥 → anchor.bin / AnchorKey / classes.dex / 签名全变。
+现在改成确定性派生：sha256("lexin-anchor:" + 项目私盐 + 源码指纹)，
+盐在 keystore/anchor.salt（不入库、不进包）。源码不变 ⇒ 包一致（已实测连跑两次哈希相同）。
+
+【复审里排除掉的假 bug】
+- adoptLoader 的 cl==loader 早退不是死代码：install 已把 loader 设成 Application 自己的 loader。
+- lastView / markedMenu 静态引用泄漏：这两个字段在当前代码里已经不存在。
+- 朋友圈 sight_* 视频不是加密体，文件头是 ftypisom/mp41 标准 MP4，别去"解密"。
+- 转发分享走 content://，不会 FileUriExposedException。
+
+【产物】
+dist/lexin.apk  686,292 B
+sha256 723107faac53fbafa4f2b11b9b4cf1b633f2da21ccaa0a21b6204560b477dcff
+version 1.6.2(47) · 构建 [7/7] 全绿 · 真机已装
+
+【已知未修（下一轮）】
+Anchors 持锁解析、defer 与 adoptLoader 双装、MIUI 上面板开关重启即丢、
+SettingsPanel 的 showing/current 状态机、Beautify 主线程解码、Steps 重入门、
+BgProvider 仍打明文日志、Theme.hookTextScale 只处理 Float 重载。

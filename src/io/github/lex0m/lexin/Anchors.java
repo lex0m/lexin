@@ -38,6 +38,16 @@ final class Anchors {
     static final String SYSMSG = "sysmsg_parser";
     /** 消息实体：带 field_msgSvrId / field_talker / field_isSend。 */
     static final String MSG = "msg";
+    /** 撤回处理器本体 doRevokeMsg：8.0.80 起只有拦这里才真的保住原消息。 */
+    static final String REVOKE_HANDLER = "revoke_handler";
+    /** 骰子/猜拳消息构造点（发送侧）：面板点击路在 8.0.80 上不触发，只能从这里改点数。 */
+    static final String DICE_BUILDER = "dice_builder";
+    /** 语音路径工具（Uj(msg,talker,true) -> .amr 绝对路径）：8.0.80 = mc0.b。 */
+    static final String VOICE_PATH = "voice_path";
+    /** 外发消息服务（所有消息的必经之地）：8.0.80 = s61.b0#Nj(List)。 */
+    static final String SEND_SERVICE = "send_service";
+    /** NetSceneSendMsg 的 doScene（8.0.80 = q61.s0）：外发消息的唯一出口。 */
+    static final String SEND_SCENE = "send_scene";
     /** 聊天行绑定器（版本表命中时用它做撤回标记，更省事）。 */
     static final String CHAT_BINDER = "chat_binder";
     /** 聊天列表适配器：类名长期不变，是行标记的兜底路径。 */
@@ -98,9 +108,11 @@ final class Anchors {
     static final String MATRIX_HOOKCHECK = "matrix_hookcheck";
     /** 服务端 sysmsg 探针分派口（ClientCheckHook / Consistency / GetAppList…）。 */
     static final String CLIENT_CHECK = "client_check";
+    /** 8.0.80 补丁 dex 里额外的检测入口（栈帧日志 / checkHook 家族 / maps 扫描）。 */
+    static final String STEALTH_EXTRA = "stealth_extra";
 
     private static final String[] ALL_SLOTS = {
-            SYSMSG, MSG, CHAT_BINDER, CHAT_ADAPTER, RNG, EMOJI_PANEL,
+            SYSMSG, MSG, REVOKE_HANDLER, VOICE_PATH, DICE_BUILDER, SEND_SERVICE, SEND_SCENE, CHAT_BINDER, CHAT_ADAPTER, RNG, EMOJI_PANEL,
             GALLERY, CARE_MODE, SNS_DB, SNS_DB2, AD_APPBRAND, AD_OPEN, SNS_AD, QR_SCAN,
             SPORT_UTIL, SPORT_DETECTOR, SPORT_PUSH_DETECTOR,
             CHAT_MENU, CHAT_MENU_SELECT, CHAT_QUICK_SELECT, CHAT_MENU_ITEMS, MM_MENU_ADD,
@@ -112,9 +124,9 @@ final class Anchors {
 
     /** 功能 -> 它需要的槽位（面板按功能报适配状态，比按槽位报更好懂）。 */
     private static final String[][] FEATURES = {
-            {"消息防撤回", SYSMSG, MSG},
+            {"消息防撤回", SYSMSG, MSG, REVOKE_HANDLER},
             {"撤回标记", CHAT_BINDER, CHAT_ADAPTER},
-            {"骰子/猜拳", EMOJI_PANEL, RNG},
+            {"骰子/猜拳", EMOJI_PANEL, RNG, DICE_BUILDER},
             {"自动查看原图", GALLERY},
             {"朋友圈保留", SNS_DB, SNS_DB2},
             // 开屏 / 小程序 / 朋友圈 三个广告拦截点同属「去广告」这一个开关，
@@ -123,7 +135,9 @@ final class Anchors {
             {"隐蔽入口", CARE_MODE},
             {"解除扫码限制", QR_SCAN},
             {"运动步数", SPORT_UTIL, SPORT_DETECTOR, SPORT_PUSH_DETECTOR},
-            {"转发增强", CHAT_MENU, CHAT_MENU_SELECT, CHAT_QUICK_SELECT, CHAT_MENU_ITEMS, MM_MENU_ADD},
+            // CHAT_MENU_ITEMS / MM_MENU_ADD 是历史遗留的死槽位（代码里没有任何调用方，
+            // 生成器里也没有对应规则），留在 FEATURES 里只会让面板一直报"未适配"，去掉。
+            {"转发增强", CHAT_MENU, CHAT_MENU_SELECT, CHAT_QUICK_SELECT},
             {"自动语音转文字", TRANSFORM_COMPONENT, CHAT_BIND_MVVM, CHATTING_CONTEXT, CHATTING_ADAPTER_V3, API_MANAGER},
             {"悬浮聊天底栏", CHAT_FOOTER},
             {"批量分类标签", NET_SCENE_QUEUE, MM_KERNEL, ADD_CONTACT_LABEL, MODIFY_CONTACT_LABEL, CORE_STORAGE, SQLITE_DB_WRAPPER},
@@ -149,7 +163,7 @@ final class Anchors {
             if (loaded) return;
             loaded = true;
             try {
-                String text = Assets.text("anchors.json");
+                String text = Assets.anchorText();   // v1.6：加密表优先，明文仅降级
                 if (text != null) {
                     JSONObject root = new JSONObject(text);
                     rules = root.optJSONObject("slots");
@@ -182,8 +196,13 @@ final class Anchors {
             c = resolve(slot);
             cache.put(slot, c);
             if (c.isEmpty()) {
-                AutoScan.markUnresolved(slot);
-                Log.d(T + "unresolved " + slot + " on " + WxVersion.name());
+                // 只有"有规则可扫"的槽位才值得触发扫描。没有规则的槽位（如历史遗留的
+                // chat_menu_items / mm_menu_add）扫也扫不出来，却会让 AutoScan 每次冷启
+                // 把所有 dex 读一遍（CPU/IO 尖峰 + 明显的检测面）。
+                boolean scannable = rule(slot) != null;
+                if (scannable) AutoScan.markUnresolved(slot);
+                Log.d(T + (scannable ? "unresolved " : "no-rule ") + slot
+                        + " on " + WxVersion.name());
             }
             return c;
         }
@@ -278,6 +297,9 @@ final class Anchors {
                     int[] p = WxVersion.parse(k);
                     if (p[0] != me[0] || p[1] != me[1]) return 900;
                     int d = p[2] - me[2];
+                    // v1.6：只回退相邻两个小版本。以前任意远都算候选，8.0.80 缺项时会
+                    // 拿 8.0.72 的类名去撞——旧类常常还在，指纹过、语义早就变了。
+                    if (d < -2 || d > 2) return 900;
                     return d == 0 ? 899 : (d < 0 ? -d : 100 + d);
                 }
             });
@@ -294,6 +316,7 @@ final class Anchors {
         int[] p = WxVersion.parse(k);
         if (p[0] != me[0] || p[1] != me[1]) return 900;
         int d = p[2] - me[2];
+        if (d < -2 || d > 2) return 900;      // 同 rank()：只认相邻两个小版本
         return d == 0 ? 899 : (d < 0 ? -d : 100 + d);
     }
 
@@ -323,11 +346,25 @@ final class Anchors {
         return i < 0 ? null : entry.substring(i + 1);
     }
 
-    /** 找一个槽位里"带方法名"的记录，返回 类名#方法名（表里没有就返回 null）。 */
+    /**
+     * 找一个槽位里「带方法名」且**方法真的存在**的记录，返回 类名#方法名。
+     *
+     * v1.6：以前只挑第一个带 # 的串，不管方法在不在。voice_path 这种给了两个候选的槽位，
+     * 第一个候选的方法可能早就没了 —— 调用方会拿着一个死方法名去挂，然后"成功但没效果"。
+     */
     static String entryWithMethod(String slot) {
         init();
         for (String src : candidates(slot)) {
-            if (src != null && src.contains("#")) return src;
+            if (src == null || !src.contains("#")) continue;
+            String cn = classNameOf(src);
+            String mn = methodNameOf(src);
+            if (cn == null || mn == null || mn.isEmpty()) continue;
+            try {
+                Class<?> c = Loaders.load(cn);
+                if (c != null && hasNamedMethod(c, mn)) return src;
+            } catch (Throwable ignored) {
+                // 下一个候选
+            }
         }
         return null;
     }
@@ -343,18 +380,28 @@ final class Anchors {
         return out;
     }
 
-    private static Class<?> verify(String slot, String className, String from) {
-        className = classNameOf(className);
+    private static Class<?> verify(String slot, String entry, String from) {
+        String className = classNameOf(entry);
+        // 表里写成 "类#方法" 时，方法名也是锚点的一部分。以前这里只取类名、
+        // 把方法名丢掉（entryWithMethod 只在两个功能里用）—— 类对了、方法搬了照样算命中。
+        String methodName = methodNameOf(entry);
         if (className == null || className.isEmpty()) return null;
         try {
-            Class<?> c = Class.forName(className, false, Features.loader);
+            // v1.6.2：不要在单一 loader 上吊死（Tinker 的补丁类在另一个 loader 里）。
+            // 按「运行时优先」的顺序逐个 loader 试，拿到真正在用的那一份。
+            Class<?> c = Loaders.load(className);
             if (c == null) return null;
             if (!fingerprintOk(slot, c)) {
                 Log.d(T + "fingerprint mismatch " + slot + " -> " + className);
                 return null;
             }
+            if (methodName != null && !methodName.isEmpty() && !hasNamedMethod(c, methodName)) {
+                Log.d(T + "method gone " + slot + " -> " + className + "#" + methodName);
+                return null;
+            }
             source.put(slot, from);
-            Log.d(T + "resolved " + slot + " -> " + className + " (" + from + ")");
+            Log.d(T + "resolved " + slot + " -> " + className + " (" + from + ")"
+                    + " loader=" + c.getClassLoader());
             return c;
         } catch (Throwable ignored) {
             return null;
@@ -441,6 +488,22 @@ final class Anchors {
             }
         } catch (Throwable ignored) {
             // 拿不到方法就当不匹配
+        }
+        return false;
+    }
+
+    /** 类里（含父类）有没有这个名字的方法 —— 表里 "#方法" 用它做二次校验。 */
+    static boolean hasNamedMethod(Class<?> c, String name) {
+        Class<?> k = c;
+        while (k != null && k != Object.class) {
+            try {
+                for (Method m : k.getDeclaredMethods()) {
+                    if (name.equals(m.getName())) return true;
+                }
+            } catch (Throwable ignored) {
+                // 拿不到就继续往上
+            }
+            k = k.getSuperclass();
         }
         return false;
     }
@@ -599,6 +662,15 @@ final class Anchors {
         return slot;
     }
 
+    /**
+     * 槽位在表里的原始条目（可能是 "类#方法"）。用于那些需要自己按方法挂的检测点。
+     * 只读当前版本 + 邻近版本，不做类解析。
+     */
+    static java.util.List<String> raw(String slot) {
+        init();
+        return candidates(slot);
+    }
+
     static String[] slots() {
         return ALL_SLOTS.clone();
     }
@@ -625,6 +697,31 @@ final class Anchors {
         return out;
     }
 
+    /**
+     * 扫描完成后清掉「解析失败」留下的空缓存。
+     *
+     * v1.5 的坑：{@link #all} 把空列表也 put 进 cache，AutoScan 扫完 → Features.retryDeferred
+     * 重新调 install → all() 读到的还是那份空缓存，**扫描等于白扫**（补装必然失败）。
+     * 只有源码缓存、没有命中结果时才清，已解析成功的槽位保持不动。
+     */
+    /** 换 ClassLoader 后用：所有已解析的类都作废（可能来自 base dex，而不是热修后的运行时 dex）。 */
+    static void clearCacheOnly() {
+        synchronized (LOCK) {
+            cache.clear();
+            source.clear();
+        }
+    }
+
+    static void clearMisses() {
+        synchronized (LOCK) {
+            List<String> drop = new ArrayList<>();
+            for (Map.Entry<String, List<Class<?>>> e : cache.entrySet()) {
+                if (e.getValue() == null || e.getValue().isEmpty()) drop.add(e.getKey());
+            }
+            for (String k : drop) cache.remove(k);
+        }
+    }
+
     /** 面板「重新适配」：清掉内存与学习缓存，触发重扫。 */
     static void forget() {
         synchronized (LOCK) {
@@ -633,6 +730,11 @@ final class Anchors {
             learned = null;
             Storage.setStr(key(), "");
             AutoScan.reset();
+            // 重扫要重新登记「哪些槽位没解析出来」：reset() 把 unresolved 清空后，
+            // AutoScan.schedule() 会因为「没有待办」直接返回 —— 面板那个按钮以前是假的。
+            for (String slot : ALL_SLOTS) {
+                if (rule(slot) != null) AutoScan.markUnresolved(slot);
+            }
         }
     }
 

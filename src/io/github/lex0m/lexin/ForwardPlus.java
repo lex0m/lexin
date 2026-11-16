@@ -51,13 +51,52 @@ final class ForwardPlus {
     private static final java.util.Set<String> knownMenuClasses =
             java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
 
+    /** 微信数据目录下的 MicroMsg：用运行期数据目录，dex 里不留 "/data/data/com.tencent.mm" 明文。 */
+    private static java.io.File microMsgDir() {
+        try {
+            return new java.io.File(Features.app.getDataDir(), "MicroMsg");
+        } catch (Throwable t) {
+            return new java.io.File("/data/data/" + new String(Entry.HOST) + "/MicroMsg");
+        }
+    }
+
+    /** 菜单类方法判定：参数里必须有 Menu 或 MenuItem，返回 void 或 Menu。 */
+    private static boolean looksLikeMenuMethod(Method m) {
+        Class<?>[] pt = m.getParameterTypes();
+        if (pt.length < 1 || pt.length > 8) return false;
+        boolean hasMenu = false;
+        for (Class<?> t : pt) {
+            if (android.view.Menu.class.isAssignableFrom(t)
+                    || android.view.MenuItem.class == t) {
+                hasMenu = true;
+                break;
+            }
+        }
+        if (!hasMenu) return false;
+        Class<?> r = m.getReturnType();
+        return r == void.class || android.view.Menu.class.isAssignableFrom(r);
+    }
+
+    private static volatile boolean armedOnce;
+
     static void install() {
+        // 第二次进来（换了运行时 ClassLoader 之后）只重挂微信类上的钩子；
+        // 框架类（PopupWindow/Dialog）由 boot loader 定义，两次解析是同一个类，
+        // 重复挂会让菜单项注入两遍。
+        boolean again = armedOnce;
+        armedOnce = true;
         int menuHits = hookMenuBuild();
-        int popupHits = hookPopup();          // ★ 框架级：任何弹窗（含长按菜单）都要经过这里
+        int popupHits = again ? 0 : hookPopup();   // ★ 框架级：任何弹窗（含长按菜单）都要经过这里
         int addHits = 0;   // ★ 关闭 hookMenuAdd：它会在构造期插一项，和视图格重复
         int itemHits = hookMenuItems();
         int selectHits = hookMenuSelect();
-        int clickHits = hookClickEntry();
+        int clickHits = 0;
+        // v1.6：微信侧挂点（菜单构造/类型项/点击回调）已经就位时，**不再装框架兜底**
+        // （View.onTouchEvent / View.performClick / AdapterView.performItemClick 三处全局热方法）。
+        // 只有当微信侧一个都没装上时，才退回框架兜底，保证老版本/新版本都不至于完全没反应。
+        // 关键：只要有菜单项被注入、却没有 hookMenuSelect 接点击，就必须留兜底，
+        // 否则会出现「菜单里能看到乐信、点下去没反应」的死角（review-p1 高危项）。
+        if (selectHits == 0 || menuHits + itemHits + selectHits == 0) clickHits = hookClickEntry();
         hookPickResult();
         SnsForward.install();                 // ★ 朋友圈：分享界面关闭后接着发图片
         int selectLimit = hookQuickSelect();
@@ -112,12 +151,13 @@ final class ForwardPlus {
             }
         }
         for (final Class<?> owner : Anchors.all(Anchors.CHAT_MENU)) {
+            // v1.6：以前是「取第一个 1~8 参方法」，8.0.80 方法一搬迁就挂到隔壁方法上（还算成功）。
+            // 现在必须参数里真的有 Menu/MenuItem —— 菜单构造/弹出那条路绕不开这两个类型。
             Method target = null;
             for (Method m : owner.getDeclaredMethods()) {
-                if (m.getParameterCount() >= 1 && m.getParameterCount() <= 8) {
-                    target = m;
-                    break;
-                }
+                if (!looksLikeMenuMethod(m)) continue;
+                target = m;
+                break;
             }
             if (target == null) continue;
             try {
@@ -129,8 +169,7 @@ final class ForwardPlus {
                             if (!Prefs.onDefault(Prefs.K_FWD_MENU)) return;
                             // 只在"消息列表"那一族组件上注入：图库/相册之类的菜单不要碰
                             String cn = owner.getName();
-                            if (!cn.startsWith("com.tencent.mm.ui.chatting.component")
-                                    && !cn.startsWith("com.tencent.mm.ui.chatting.viewitems")) return;
+                            if (!cn.startsWith(S.WX_P3) && !cn.startsWith(S.WX_P1)) return;
                             Object menu = firstMenuArg(p.args);
                             if (menu == null) return;
                             lastOwner = p.thisObject;               // 点击时要靠它找回消息
@@ -1073,7 +1112,7 @@ final class ForwardPlus {
      */
     private static java.io.File findVoiceFile(String name) {
         try {
-            java.io.File base = new java.io.File("/data/data/com.tencent.mm/MicroMsg");
+            java.io.File base = microMsgDir();
             java.io.File[] tops = base.listFiles();
             if (tops == null) return null;
             String talker = lastTalker == null ? null : lastTalker.replace('/', '_').replace(".", "_");
@@ -1110,7 +1149,7 @@ final class ForwardPlus {
      */
     private static java.io.File nearestVoice(long msgTimeMs) {
         try {
-            java.io.File base = new java.io.File("/data/data/com.tencent.mm/MicroMsg");
+            java.io.File base = microMsgDir();
             java.io.File[] tops = base.listFiles();
             if (tops == null) return null;
             java.io.File best = null;
@@ -1148,7 +1187,7 @@ final class ForwardPlus {
     private static String dumpVoiceLayout() {
         StringBuilder sb = new StringBuilder();
         try {
-            java.io.File base = new java.io.File("/data/data/com.tencent.mm/MicroMsg");
+            java.io.File base = microMsgDir();
             java.io.File[] tops = base.listFiles();
             if (tops == null) return "MicroMsg 不可读";
             int shown = 0;
@@ -1237,6 +1276,41 @@ final class ForwardPlus {
      */
     private static String voicePathSilently(Object msg, String talker) {
         try {
+            // ★ v1.5.15：8.0.80 的正路。旧版硬编码的 pv.p0#ej 在这一版已经变成 View 的
+            // onClick（Class.forName 能过、方法早没了），所以语音路径一直取不到。
+            // 新位置是 mc0.b：里面有个 Uj(f9, talker, boolean) -> String，
+            // 直接收消息对象返回 .amr 绝对路径，不用自己造 VoiceInfo。
+            // 这里按「签名 + 首参是 com.tencent.mm.storage.*」找，不写死方法名。
+            try {
+                Class<?> vp = Anchors.cls(Anchors.VOICE_PATH);
+                if (vp != null) {
+                    for (java.lang.reflect.Method m : vp.getDeclaredMethods()) {
+                        Class<?>[] pt = m.getParameterTypes();
+                        if (m.getReturnType() != String.class || pt.length != 3) continue;
+                        if (pt[1] != String.class || pt[2] != boolean.class) continue;
+                        if (!pt[0].getName().startsWith(S.WX_P4)) continue;
+                        Object inst = null;
+                        if (!java.lang.reflect.Modifier.isStatic(m.getModifiers())) {
+                            try {
+                                java.lang.reflect.Constructor<?> ct = vp.getDeclaredConstructor();
+                                ct.setAccessible(true);
+                                inst = ct.newInstance();
+                            } catch (Throwable ignored) {
+                                continue;
+                            }
+                        }
+                        m.setAccessible(true);
+                        Object r = m.invoke(inst, msg, talker, true);
+                        if (r instanceof String && ((String) r).length() > 0
+                                && new java.io.File((String) r).isFile()) {
+                            Log.d(T + "amr via voice_path#" + m.getName() + ": " + r);
+                            return (String) r;
+                        }
+                    }
+                }
+            } catch (Throwable t) {
+                Log.d(T + "voice_path 失败: " + t);
+            }
             // ★★ 正确调用（照抄 WeKit 的 getVoiceFullPath）：
             //   getAmrFullPath(null, encPath, true)  ← 第一个参数就是 null，第二个才是 imgPath
             try {
@@ -1303,7 +1377,7 @@ final class ForwardPlus {
                 for (java.lang.reflect.Method m : vx.getDeclaredMethods()) {
                     if (!m.getName().equals("a")) continue;
                     if (m.getParameterCount() != 2) continue;
-                    if (!m.getParameterTypes()[0].getName().equals("com.tencent.mm.storage.e9")) continue;
+                    if (!m.getParameterTypes()[0].getName().equals(S.WX_P2)) continue;
                     m.setAccessible(true);
                     voiceInfo = m.invoke(null, msg, null);
                     if (voiceInfo != null) {
@@ -1393,7 +1467,7 @@ final class ForwardPlus {
                 Class<?> vx = Class.forName("ou5.x", false, Features.loader);
                 for (java.lang.reflect.Method m : vx.getDeclaredMethods()) {
                     if (!m.getName().equals("a") || m.getParameterCount() != 2) continue;
-                    if (!m.getParameterTypes()[0].getName().equals("com.tencent.mm.storage.e9")) continue;
+                    if (!m.getParameterTypes()[0].getName().equals(S.WX_P2)) continue;
                     m.setAccessible(true);
                     vi = m.invoke(null, msg, null);
                     break;
@@ -1467,7 +1541,7 @@ final class ForwardPlus {
     private static java.util.Set<String> listVoiceFiles() {
         java.util.Set<String> out = new java.util.HashSet<>();
         try {
-            java.io.File base = new java.io.File("/data/data/com.tencent.mm/MicroMsg");
+            java.io.File base = microMsgDir();
             java.io.File[] tops = base.listFiles();
             if (tops == null) return out;
             for (java.io.File hash : tops) {
@@ -1496,7 +1570,7 @@ final class ForwardPlus {
     /** 找某个时间点之后被修改的最新语音文件。 */
     private static java.io.File newestVoiceSince(long sinceMs) {
         try {
-            java.io.File base = new java.io.File("/data/data/com.tencent.mm/MicroMsg");
+            java.io.File base = microMsgDir();
             java.io.File[] tops = base.listFiles();
             if (tops == null) return null;
             java.io.File best = null;
@@ -1694,7 +1768,7 @@ final class ForwardPlus {
             if (pendingVoice != null) { toast("上一次选择还没完成"); return; }
             pendingVoice = msg;
             android.content.Intent it = new android.content.Intent();
-            it.setClassName(ctx, "com.tencent.mm.ui.transmit.SelectConversationUI");
+            it.setClassName(ctx, S.WX_P12);
             it.putExtra("Select_Conv_Type", 3);
             it.putExtra("select_is_ret", true);
             it.putExtra("select_fmt_callback", true);
@@ -1881,6 +1955,10 @@ final class ForwardPlus {
             Method target = null;
             for (Method m : owner.getDeclaredMethods()) {
                 if (m.getParameterCount() == 0 || m.getParameterCount() > 6) continue;
+                // 必须只挑 void 的：下面 before 里 p.setResult(null)，如果挑中 (MenuItem)->boolean/int
+                // 的重载，框架会把 null 拆箱 → NPE 把微信点崩。getDeclaredMethods 顺序不保证，
+                // 这条没判就会随机崩。
+                if (m.getReturnType() != void.class) continue;
                 boolean has = false;
                 for (Class<?> pc : m.getParameterTypes()) {
                     if (MenuItem.class.equals(pc)) { has = true; break; }

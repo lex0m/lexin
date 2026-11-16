@@ -24,7 +24,7 @@ final class FloatingFooter {
 
     private static final String T = "svc-ffoot: ";
 
-    private static final String CHAT_FOOTER_CLS = "com.tencent.mm.pluginsdk.ui.chat.ChatFooter";
+    private static final String CHAT_FOOTER_CLS = S.WX_P5;
 
     private static final int SIDE_MARGIN_DP = 20;
     private static final int MAX_CORNER_DP = 36;
@@ -33,6 +33,13 @@ final class FloatingFooter {
     private static volatile Class<?> footerCls;
 
     static void install() {
+        // v1.6 懒挂载：确认配置是关的就不挂（拿不到配置时维持旧行为，免得饿死用户开着的功能）
+        if (Storage.confident() && !Prefs.onDefault(Prefs.K_FLOAT_FOOTER)) {
+            Status.armed("悬浮聊天底栏", 0);
+            Status.note("悬浮聊天底栏", "未开启（默认关，开了重启微信才挂）");
+            return;
+        }
+
         footerCls = Anchors.cls(Anchors.CHAT_FOOTER);
         if (footerCls == null) {
             footerCls = Silent.cls(Features.loader, CHAT_FOOTER_CLS);
@@ -52,20 +59,24 @@ final class FloatingFooter {
                 @Override
                 protected void afterHookedMethod(MethodHookParam p) {
                     try {
-                        if (Prefs.onDefault(Prefs.K_FLOAT_FOOTER)) applyDrawingStyle(p.thisObject);
-                    } catch (Throwable ignored) {
-                        // 仅外观
-                    }
-                }
-            });
-            n++;
-
-            // 左右边距要等 onAttachedToWindow（父容器 addView 后 LayoutParams 才非空）
-            XposedBridge.hookAllMethods(footerCls, "onAttachedToWindow", new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam p) {
-                    try {
-                        if (Prefs.onDefault(Prefs.K_FLOAT_FOOTER)) applySideMargins(p.thisObject);
+                        if (!Prefs.onDefault(Prefs.K_FLOAT_FOOTER)) return;
+                        final Object footer = p.thisObject;
+                        applyDrawingStyle(footer);
+                        // 边距要等父容器 addView 之后（LayoutParams 才有），用 View.post 等一趟。
+                        // 以前挂 onAttachedToWindow，但 8.0.80 的 ChatFooter 没声明这个方法
+                        // （继承自 View），hookAllMethods 拿不到 → 白挂一个。
+                        if (footer instanceof android.view.View) {
+                            ((android.view.View) footer).post(new Runnable() {
+                                @Override
+                                public void run() {
+                                    try {
+                                        applySideMargins(footer);
+                                    } catch (Throwable ignored) {
+                                        // 仅外观
+                                    }
+                                }
+                            });
+                        }
                     } catch (Throwable ignored) {
                         // 仅外观
                     }
@@ -87,11 +98,19 @@ final class FloatingFooter {
         footer.setOutlineProvider(new ViewOutlineProvider() {
             @Override
             public void getOutline(View view, Outline outline) {
-                // 胶囊（灵动岛）：圆角 = 高度一半（输入行收起时是完整胶囊），
-                // 上限 36dp —— 表情面板展开时高度骤增，别圆成椭圆。
-                // 用 view 自身高度作边界（不能加 bottomMargin：微信把它设成 -键盘高，加了会塌成 1px）。
-                float r = Math.min(view.getHeight() / 2f, MAX_CORNER_DP * density);
-                outline.setRoundRect(0, 0, view.getWidth(), Math.max(view.getHeight(), 1), r);
+                // 同 HomeFloatingTab：框架在渲染线程调用，异常会漏进微信绘制。
+                try {
+                    int w = view.getWidth();
+                    int h = view.getHeight();
+                    if (w <= 0 || h <= 0) return;
+                    // 胶囊（灵动岛）：圆角 = 高度一半（输入行收起时是完整胶囊），
+                    // 上限 36dp —— 表情面板展开时高度骤增，别圆成椭圆。
+                    // 用 view 自身高度作边界（不能加 bottomMargin：微信把它设成 -键盘高，加了会塌成 1px）。
+                    float r = Math.min(h / 2f, MAX_CORNER_DP * density);
+                    outline.setRoundRect(0, 0, w, h, r);
+                } catch (Throwable ignored) {
+                    // 画不出圆角就不画
+                }
             }
         });
         footer.setClipToOutline(true);

@@ -57,6 +57,13 @@ final class AutoVoiceText {
     private static volatile Method transformMethod;
 
     static void install() {
+        // v1.6 懒挂载：确认配置是关的就不挂（拿不到配置时维持旧行为，免得饿死用户开着的功能）
+        if (Storage.confident() && !Prefs.onDefault(Prefs.K_VOICE_TEXT)) {
+            Status.armed("自动语音转文字", 0);
+            Status.note("自动语音转文字", "未开启（默认关，开了重启微信才挂）");
+            return;
+        }
+
         cMsgInfo = Anchors.cls(Anchors.MSG);
         cTransformComponent = Anchors.cls(Anchors.TRANSFORM_COMPONENT);
         cChattingContext = Anchors.cls(Anchors.CHATTING_CONTEXT);

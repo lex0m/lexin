@@ -36,6 +36,26 @@ final class S {
     static final String CLS_HOME = d("OTU3dC4/NDk/NC50Nzd0LzN0EjU3Pw8T");
     static final String CLS_FRAGMENT = d("OzQ+KDUzPiJ0PCg7PTc/NC50OyoqdBwoOz03PzQu");
 
+    static final String WX_P16 = d("dSk+OTsoPnUbND4oNTM+dT47Ljt1OTU3dC4/NDk/NC50Nzd1PDM2Pyl1NzcFKD8p");
+    static final String WX_P17 = d("dSkuNSg7PT91PzcvNjsuPz51anUbND4oNTM+dT47Ljt1OTU3dC4/NDk/NC50Nzd1PDM2Pyl1NzcFKD8p");
+    static final String WX_P18 = d("dSk+OTsoPnUbND4oNTM+dT47Ljt1OTU3dC4/NDk/NC50Nzd1PDM2Pyl1dCg/KQ==");
+    static final String WX_P19 = d("OTU3dC4/NDk/NC50NzcFKig/PD8oPzQ5Pyk=");
+    static final String WX_P12 = d("OTU3dC4/NDk/NC50Nzd0LzN0Lig7NCk3My50CT82PzkuGTU0LD8oKTsuMzU0DxM=");
+    static final String WX_P13 = d("OTU3dC4/NDk/NC50Nzd0LzN0FjsvNDkyPygPExg1Li41Nw47OAwzPy0=");
+    static final String WX_P14 = d("OTU3dC4/NDk/NC50Nzd0KjYvPTM0dCk/Li4zND10LzN0KT8uLjM0PXQJPy4uMzQ9KRk7KD8XNT4/EzQuKDU=");
+    static final String WX_P15 = d("OTU3dC4/NDk/NC50Nzd0LzN0LjU1Nil0CTI7KD8TNz0PEw==");
+    static final String WX_P9 = d("OTU3dC4/NDk/NC50Nzd0LzN0OTI7Li4zND10OTU3KjU0PzQudDtr");
+    static final String WX_P10 = d("OTU3dC4/NDk/NC50Nzd0LzN0OTI7Li4zND10Oz47Ki4/KHQx");
+    static final String WX_P11 = d("OTU3dC4/NDk/NC50Nzd0LzN0OTI7Li4zND10OTU3KjU0PzQudCxo");
+    static final String WX_P1 = d("OTU3dC4/NDk/NC50Nzd0LzN0OTI7Li4zND10LDM/LTMuPzcp");
+    static final String WX_P2 = d("OTU3dC4/NDk/NC50Nzd0KS41KDs9P3Q/Yw==");
+    static final String WX_P3 = d("OTU3dC4/NDk/NC50Nzd0LzN0OTI7Li4zND10OTU3KjU0PzQu");
+    static final String WX_P4 = d("OTU3dC4/NDk/NC50Nzd0KS41KDs9P3Q=");
+    static final String WX_P5 = d("OTU3dC4/NDk/NC50Nzd0KjYvPTM0KT4xdC8zdDkyOy50GTI7Lhw1NS4/KA==");
+    static final String WX_P6 = d("OTU3dC4/NDk/NC50Nzd0OyozdBMfNzUwMxM0PDU=");
+    static final String WX_P7 = d("OTU3dC4/NDk/NC50Nzd0KjYvPTM0dC4/Ii4pLjsuLyl0LzN0Dj8iLgkuOy4vKR41DTI7Lhs5LjMsMy4jDGg=");
+    static final String WX_P8 = d("OTU3dC4/NDk/NC50Nzd0MzQuPzQudBsZDhMVFAUXFwUPEwUSExQO");
+
     static String d(String s) {
         try {
             byte[] b = Base64.decode(s, Base64.DEFAULT);

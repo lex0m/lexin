@@ -117,7 +117,11 @@ final class AutoScan {
 
     private static void scan() throws Exception {
         String apk = Features.app.getApplicationInfo().sourceDir;
-        Set<String> want = new HashSet<>(unresolved);
+        Set<String> want = new HashSet<>();
+        for (String slot : unresolved) {
+            if (Anchors.rule(slot) == null) continue;   // 无规则 = 不可扫，别拖住 allDone
+            want.add(slot);
+        }
         if (want.isEmpty()) return;
 
         // 收集每个槽位的字节前缀（有稳定包名的槽位直接按前缀抠字符串）
@@ -173,41 +177,12 @@ final class AutoScan {
                 dexCount++;
                 byte[] data = read(zip, e);
                 if (data == null) continue;
-                for (int i = 0; i < prefixes.size(); i++) {
-                    String slot = prefixSlot.get(i);
-                    if (found.containsKey(slot)) continue;
-                    List<String> names = grab(data, prefixes.get(i), 24);
-                    if (names.isEmpty()) continue;
-                    pick(slot, names);
-                }
-                if (!broad.isEmpty()) {
-                    List<String> loose = grabLoose(data, 4000);
-                    for (String slot : broad) {
-                        if (found.containsKey(slot)) continue;
-                        pick(slot, loose);
-                    }
-                }
-                // strings 特征槽位：解析 dex 方法体 const-string，按类级字符串并集匹配
-                if (!stringSlots.isEmpty()) {
-                    for (int i = 0; i < stringSlots.size(); i++) {
-                        String slot = stringSlots.get(i);
-                        if (found.containsKey(slot)) continue;
-                        List<String> names = scanStrings(data, stringWanteds.get(i));
-                        if (names.isEmpty()) continue;
-                        learnStrings(slot, names);
-                    }
-                }
-                // 都解决了就早点收工
-                boolean allDone = true;
-                for (String slot : want) {
-                    if (!found.containsKey(slot)) {
-                        allDone = false;
-                        break;
-                    }
-                }
-                if (allDone) break;
+                scanBytes(data, prefixes, prefixSlot, broad, stringSlots, stringWanteds, want);
                 data = null;
             }
+            // 微信用 Tinker 热修：运行时用的是补丁 dex，自动适配必须也扫它，
+            // 否则"扫出来的类名"来自 base.apk，挂上去全是死类（2026-11-16 实测）。
+            dexCount += scanTinkerPatches(prefixes, prefixSlot, broad, stringSlots, stringWanteds, want);
             Log.d(T + "dex=" + dexCount + " hits=" + found.size());
         } finally {
             close(zip);
@@ -215,6 +190,114 @@ final class AutoScan {
     }
 
     /** 候选里挑第一个通过指纹校验的，并写入学习缓存。 */
+    /** 扫描一个 dex 字节块（base 与补丁 dex 共用）。 */
+    private static void scanBytes(byte[] data, List<byte[]> prefixes, List<String> prefixSlot,
+                                  List<String> broad, List<String> stringSlots,
+                                  List<String[]> stringWanteds, Set<String> want) {
+        for (int i = 0; i < prefixes.size(); i++) {
+            String slot = prefixSlot.get(i);
+            if (found.containsKey(slot)) continue;
+            List<String> names = grab(data, prefixes.get(i), 24);
+            if (names.isEmpty()) continue;
+            pick(slot, names);
+        }
+        if (!broad.isEmpty()) {
+            List<String> loose = grabLoose(data, 4000);
+            for (String slot : broad) {
+                if (found.containsKey(slot)) continue;
+                pick(slot, loose);
+            }
+        }
+        if (!stringSlots.isEmpty()) {
+            for (int i = 0; i < stringSlots.size(); i++) {
+                String slot = stringSlots.get(i);
+                if (found.containsKey(slot)) continue;
+                List<String> names = scanStrings(data, stringWanteds.get(i));
+                if (names.isEmpty()) continue;
+                learnStrings(slot, names);
+            }
+        }
+    }
+
+    /**
+     * 扫描 Tinker 补丁 dex（{@code <dataDir>/tinker/patch-xxx/dex/tinker_classN.apk}）。
+     *
+     * 8.0.80 运行时用 `DelegateLastClassLoader` 从补丁 apk 加载类，base.apk 里的同名类是死类。
+     * 只扫最新的一个补丁目录；返回扫过的 dex 数。
+     */
+    private static int scanTinkerPatches(List<byte[]> prefixes, List<String> prefixSlot,
+                                         List<String> broad, List<String> stringSlots,
+                                         List<String[]> stringWanteds, Set<String> want) {
+        int n = 0;
+        try {
+            if (Features.app == null) return 0;
+            java.io.File root = new java.io.File(Features.app.getDataDir(), "tinker");
+            java.io.File[] patches = root.listFiles();
+            if (patches == null || patches.length == 0) return 0;
+            java.util.Arrays.sort(patches, new java.util.Comparator<java.io.File>() {
+                @Override
+                public int compare(java.io.File a, java.io.File b) {
+                    long ta = a.lastModified(), tb = b.lastModified();
+                    return ta == tb ? 0 : (ta < tb ? 1 : -1);
+                }
+            });
+            for (java.io.File patch : patches) {
+                java.io.File dexDir = new java.io.File(patch, "dex");
+                java.io.File[] apks = dexDir.listFiles();
+                if (apks == null) continue;
+                for (java.io.File apk : apks) {
+                    if (!apk.getName().endsWith(".apk") && !apk.getName().endsWith(".dex")) continue;
+                    try {
+                        if (apk.getName().endsWith(".dex")) {
+                            byte[] data = readFile(apk);
+                            if (data != null) {
+                                scanBytes(data, prefixes, prefixSlot, broad, stringSlots,
+                                        stringWanteds, want);
+                                n++;
+                            }
+                        } else {
+                            ZipFile z = new ZipFile(apk);
+                            try {
+                                for (ZipEntry e : Collections.list(z.entries())) {
+                                    String nm = e.getName();
+                                    if (!nm.startsWith("classes") || !nm.endsWith(".dex")) continue;
+                                    byte[] data = read(z, e);
+                                    if (data == null) continue;
+                                    scanBytes(data, prefixes, prefixSlot, broad, stringSlots,
+                                            stringWanteds, want);
+                                    n++;
+                                }
+                            } finally {
+                                close(z);
+                            }
+                        }
+                    } catch (Throwable ignored) {
+                        // 这个补丁文件坏了就跳过
+                    }
+                }
+                break;      // 只扫最新补丁
+            }
+        } catch (Throwable t) {
+            Log.d(T + "patch scan failed: " + t.getClass().getSimpleName());
+        }
+        return n;
+    }
+
+    private static byte[] readFile(java.io.File f) {
+        java.io.FileInputStream in = null;
+        try {
+            in = new java.io.FileInputStream(f);
+            byte[] buf = new byte[(int) Math.min(f.length(), 32 * 1024 * 1024)];
+            int off = 0, r;
+            while (off < buf.length && (r = in.read(buf, off, buf.length - off)) > 0) off += r;
+            return buf;
+        } catch (Throwable t) {
+            return null;
+        } finally {
+            try { if (in != null) in.close(); } catch (Throwable ignored) { }
+        }
+    }
+
     private static void pick(String slot, List<String> names) {
         for (String n : names) {
             try {

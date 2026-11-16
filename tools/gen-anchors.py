@@ -37,6 +37,18 @@ SLOTS = {
         "scan": True,
         "note": "8.0.70-8.0.79 均为 platformtools 下的短名类",
     },
+    # ── 防撤回：撤回处理器本体（开源项目同款节点） ──
+    # 只拦上游的 sysmsg 解析在 8.0.80 上不够：解析结果里不再带 revokemsg，
+    # 本地消息照样被改写。这里直接认 doRevokeMsg 本身
+    # （签名 g(String talker, long serverId, p0 envelope, String, String, String)）。
+    "revoke_handler": {
+        "pkg": "",
+        "simple": r"^.+$",
+        "strings": ["doRevokeMsg revokeFlag=", "doRevokeMsg xmlSrvMsgId="],
+        "emitMethod": "doRevokeMsg revokeFlag=",
+        "scan": False,
+        "note": "撤回处理器：8.0.80 = w41.u#c（开源 wechat-anti-recall 同款节点）",
+    },
     # ── 防撤回：消息实体（记 talker+svrId 才能把撤回标记贴回原消息） ──
     "msg": {
         "pkg": "com.tencent.mm.storage",
@@ -91,6 +103,10 @@ SLOTS = {
         "pkg": "",
         "simple": r"^[a-z0-9]{1,4}$",
         "method": "A(java.lang.String,java.lang.String):boolean",
+        # t93.l = 8.0.80 上带 EnMicroMsg.db / DROP TABLE 的那个 WCDB 包装（sns_db2 也命中它）。
+        # 光靠 method 指纹会挑到 ae.s —— 它同样声明了 A(String,String):boolean，但运行时
+        # Class.forName 加载不到（日志实证 unresolved sns_db），种子优先指到能用的那个。
+        "seed": ["t93.l", "ae.s"],
         "multi": True,
         "scan": True,
         "note": "一个版本里可能同时存在多个库对象，全挂上",
@@ -291,6 +307,46 @@ SLOTS = {
         "note": "SQLite 包装（拿 WCDB SQLiteDatabase 实例）",
     },
     # ══════════════════════════════════════════════════════════════════════
+    # ── 消息发送 NetScene（8.0.80 = q61.s0#doScene）：标准 Xposed 能挂的发送入口 ──
+    "send_scene": {
+        "pkg": "",
+        "simple": r"^.+$",
+        "strings": ["MicroMsg.NetSceneSendMsg", "/cgi-bin/micromsg-bin/newsendmsg"],
+        "scan": False,
+        "note": "NetSceneSendMsg：8.0.80 = q61.s0（doScene）",
+    },
+    # ── 消息发送服务（8.0.80 = s61.b0#Nj）：所有外发消息的必经之地 ──
+    # 兜底用：面板点击/消息构造两条路在 8.0.80 上都拿不到骰子，只剩这里一定能碰到。
+    "send_service": {
+        "pkg": "",
+        "simple": r"^.+$",
+        "strings": ["MicroMsg.SendMsgService", "send msgs req exceed max limit"],
+        "emitMethod": "MicroMsg.SendMsgService",
+        "scan": False,
+        "note": "外发消息服务：8.0.80 = s61.b0#Nj(List)",
+    },
+    # ── 语音路径工具（8.0.80 = mc0.b）：旧版硬编码的 pv.p0 已经变成 View 点击器 ──
+    # 里面有 Uj(msg, talker, boolean) -> String（WeKit 的 getVoiceFullPath 新版），
+    # 直接收消息对象返回 .amr 绝对路径，不用自己造 VoiceInfo。
+    "voice_path": {
+        "pkg": "",
+        "simple": r"^.+$",
+        "strings": ["getVoiceFullPath"],
+        "emitMethod": "getVoiceFullPath",
+        "scan": False,
+        "note": "语音路径工具：8.0.80 = mc0.b#hk（Uj 直接收 f9）",
+    },
+    # ── 骰子/猜拳：消息构造点（8.0.80 实测 = bo5.b1#a，方法体里有 dice / dice_ / getMd5） ──
+    # 面板点击那条路（yr.p 的 a/b）在 8.0.80 上一次都没被调用（logcat 实证），
+    # 所以改从发送侧下手：微信把点数写进消息 content（"dice_N"）时拦下来换值。
+    "dice_builder": {
+        "pkg": "",
+        "simple": r"^[a-z0-9]{1,4}$",
+        "strings": ["dice_", "getMd5(...)"],
+        "emitMethod": "dice_",
+        "scan": False,
+        "note": "骰子/猜拳消息构造：8.0.80 = bo5.b1#a",
+    },
     # 隐蔽性（v1.5）：微信自己装了三道探针，都会被我们这套 hook 触发。
     # 三个槽位都靠「方法里的特征字符串」定位，类名/方法名再变也认得出来。
     # ══════════════════════════════════════════════════════════════════════

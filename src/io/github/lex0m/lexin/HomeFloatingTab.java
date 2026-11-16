@@ -23,13 +23,20 @@ final class HomeFloatingTab {
 
     private static final String T = "svc-hftab: ";
 
-    private static final String TAB_CLS = "com.tencent.mm.ui.LauncherUIBottomTabView";
+    private static final String TAB_CLS = S.WX_P13;
 
     private static final int SIDE_MARGIN_DP = 20;
     private static final int BOTTOM_GAP_DP = 14;
     private static final int ELEVATION_DP = 12;
 
     static void install() {
+        // v1.6 懒挂载：确认配置是关的就不挂（拿不到配置时维持旧行为，免得饿死用户开着的功能）
+        if (Storage.confident() && !Prefs.onDefault(Prefs.K_HOME_FLOAT_TAB)) {
+            Status.armed("主页悬浮底栏", 0);
+            Status.note("主页悬浮底栏", "未开启（默认关，开了重启微信才挂）");
+            return;
+        }
+
         Class<?> cls = Silent.cls(Features.loader, TAB_CLS);
         boolean ok = cls != null && hook(cls);
         Status.set("主页悬浮底栏", ok);
@@ -81,9 +88,18 @@ final class HomeFloatingTab {
         tab.setOutlineProvider(new ViewOutlineProvider() {
             @Override
             public void getOutline(View view, Outline outline) {
-                // 胶囊（灵动岛）：圆角 = 高度一半，两端完全半圆
-                float r = view.getHeight() / 2f;
-                outline.setRoundRect(0, 0, view.getWidth(), Math.max(view.getHeight(), 1), r);
+                // getOutline 由框架在渲染线程调用，这里抛出去会把异常漏进微信的绘制流程
+                // （模块的其它回调都吞异常，唯独这一段以前没有）。
+                try {
+                    int w = view.getWidth();
+                    int h = view.getHeight();
+                    if (w <= 0 || h <= 0) return;      // 首次布局前是 0×0，setRoundRect 会抛
+                    // 胶囊（灵动岛）：圆角 = 高度一半，两端完全半圆
+                    float r = Math.min(h / 2f, (int) (view.getResources().getDisplayMetrics().density * 28));
+                    outline.setRoundRect(0, 0, w, h, r);
+                } catch (Throwable ignored) {
+                    // 画不出圆角就不画，绝不影响宿主
+                }
             }
         });
         tab.setClipToOutline(true);

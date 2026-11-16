@@ -34,14 +34,111 @@ final class Stealth {
 
     static void install() throws Throwable {
         int x = stackCheck();
-        int m = matrixCheck();
+        // 2026-11-16 补丁 dex 复核：`pv0.u0#a` 不是检测，是微信自己的崩溃回溯安装器
+        // （往 libwechatcrash/libwxperf-tkill 装 signal hook）。跳过它只会废掉微信的崩溃上报，
+        // 还会改变崩溃路径行为 —— 已经撤掉。
+        int m = 0;
         int p = hideOwnPackage();
-        int n = x + m + p;
-        Status.set("环境隐蔽", n > 0);
+        int e = tinkerBranch() + extraChecks();
+        int n = x + m + p + e;
+        Status.armed("环境隐蔽", n);
         Status.note("环境隐蔽", n > 0
-                ? "栈帧自检 " + x + " · native 自查 " + m + " · 包名隐藏 " + p
+                ? "栈帧自检 " + x + " · Tinker 破坏链 " + e + " · 包名隐藏 " + p
                 : "当前微信版本未适配");
         Log.d(T + "armed stack=" + x + " matrix=" + m + " pkg=" + p);
+    }
+
+    /**
+     * Tinker 反制链的第一段：`com.tencent.mm.app.j3#c(Throwable)`（tag TinkerCrashProtect）。
+     *
+     * **不整段跳过**——那会把微信自己的崩溃保护一起跳过，等于制造新的异常行为。
+     * 只在异常文案命中检测分支时才跳过这一次处理：
+     *   ① "Class ref in pre-verified class resolved to unexpected implementation"（Xposed 典型症状）
+     *   ② "tag requires a 'drawable' attribute"（ZUK 机型分支，反汇编确认它不走 j3#a）
+     * 其余崩溃照常走微信自己的逻辑。
+     */
+    private static int tinkerBranch() {
+        int n = 0;
+        try {
+            Class<?> j3 = Loaders.load("com.tencent.mm.app.j3");
+            if (j3 == null) return 0;
+            for (final Method m : j3.getDeclaredMethods()) {
+                if (!"c".equals(m.getName()) || m.getReturnType() != void.class) continue;
+                Class<?>[] pt = m.getParameterTypes();
+                if (pt.length != 1 || !Throwable.class.isAssignableFrom(pt[0])) continue;
+                m.setAccessible(true);
+                XposedBridge.hookMethod(m, new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam p) {
+                        try {
+                            if (!Prefs.onDefault(Prefs.K_STEALTH)) return;
+                            Object t = p.args != null && p.args.length > 0 ? p.args[0] : null;
+                            String msg = t instanceof Throwable ? String.valueOf(((Throwable) t).getMessage()) : "";
+                            if (msg.contains("pre-verified class")
+                                    || msg.contains("tag requires a 'drawable'")) {
+                                Status.hit("环境隐蔽");
+                                p.setResult(null);      // 只跳过这一次检测分支
+                            }
+                        } catch (Throwable ignored) {
+                            // 不打扰宿主
+                        }
+                    }
+                });
+                n++;
+            }
+        } catch (Throwable ignored) {
+            // 拿不到就不挂
+        }
+        return n;
+    }
+
+    // ── ⓪ 8.0.80 补丁 dex 里额外的检测入口 ─────────────────────────────────
+
+    /**
+     * 实测（2026-11-16，补丁 dex classes13）：
+     *   com.tencent.mm.app.j3#c(Throwable)->void   记 "have xposed"
+     *   zh.b0/e4/j3/m2/m#c()->void                 checkHook 家族
+     *   com.tencent.matrix.mallctl.MallCtl#a(ni.b)  读 /proc/self/maps
+     * 这些都是 void 方法，跳过方法体即可；拿不到就跳过，不影响其它探针。
+     */
+    private static int extraChecks() {
+        int n = 0;
+        for (String entry : Anchors.raw(Anchors.STEALTH_EXTRA)) {
+            String cn = Anchors.classNameOf(entry);
+            String mn = Anchors.methodNameOf(entry);
+            if (cn == null || mn == null) continue;
+            Class<?> c;
+            try {
+                c = Loaders.load(cn);
+            } catch (Throwable t) {
+                continue;
+            }
+            if (c == null) continue;
+            for (final Method m : c.getDeclaredMethods()) {
+                if (!mn.equals(m.getName())) continue;
+                if (m.getReturnType() != void.class) continue;
+                try {
+                    m.setAccessible(true);
+                    XposedBridge.hookMethod(m, new XC_MethodHook() {
+                        @Override
+                        protected void beforeHookedMethod(MethodHookParam p) {
+                            try {
+                                if (!Prefs.onDefault(Prefs.K_STEALTH)) return;
+                                Status.hit("环境隐蔽");
+                                p.setResult(null);       // 整个方法体跳过
+                            } catch (Throwable ignored) {
+                                // 不打扰宿主
+                            }
+                        }
+                    });
+                    n++;
+                } catch (Throwable ignored) {
+                    // 下一个
+                }
+            }
+        }
+        Log.d(T + "extra checks=" + n);
+        return n;
     }
 
     // ── ① 栈帧自检：让「有没有 Xposed」永远答 false ────────────────────────
@@ -60,6 +157,7 @@ final class Stealth {
                         protected void beforeHookedMethod(MethodHookParam p) {
                             try {
                                 if (!Prefs.onDefault(Prefs.K_STEALTH)) return;
+                                Status.hit("环境隐蔽");     // 微信真的来查了（说明探针存在且被拦）
                                 p.setResult(Boolean.FALSE);
                             } catch (Throwable ignored) {
                                 // 不打扰宿主
@@ -75,7 +173,7 @@ final class Stealth {
         return n;
     }
 
-    // ── ② Matrix native 自查：不让它去查 so ────────────────────────────────
+    // ── ② 已废弃：pv0.u0#a 是崩溃回溯安装器，不是检测（保留代码仅供对照） ─────────
 
     private static int matrixCheck() {
         String mn = Anchors.methodNameOf(Anchors.entryWithMethod(Anchors.MATRIX_HOOKCHECK));

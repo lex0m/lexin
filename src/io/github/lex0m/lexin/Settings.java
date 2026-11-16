@@ -1,6 +1,7 @@
 package io.github.lex0m.lexin;
 
 import android.app.Activity;
+import android.app.Application;
 import android.content.Intent;
 import android.view.View;
 import android.view.ViewGroup;
@@ -26,7 +27,7 @@ final class Settings {
     private static String careModeClass() {
         Class<?> c = Anchors.cls(Anchors.CARE_MODE);
         return c != null ? c.getName()
-                : "com.tencent.mm.plugin.setting.ui.setting.SettingsCareModeIntro";
+                : S.WX_P14;
     }
     /** Label of the button that answers the long press. */
     private static final String TRIGGER_TEXT = "\u5f00\u542f";
@@ -65,83 +66,50 @@ final class Settings {
     }
 
     static void install() throws Throwable {
-        hookCareMode();
-        hookEntryIntent();
-        Status.set("隐蔽入口", true);
+        // v1.6：这两件事以前都挂 framework 的 Activity.onCreate/onNewIntent（全局热方法），
+        // 现在全部走官方生命周期回调 —— 零 hook，行为不变。
+        try {
+            android.app.Application application = (android.app.Application) Features.app;
+            if (application != null) {
+                application.registerActivityLifecycleCallbacks(
+                        new android.app.Application.ActivityLifecycleCallbacks() {
+                            @Override
+                            public void onActivityCreated(Activity a, android.os.Bundle b) {
+                                maybeCareMode(a);
+                            }
+
+                            @Override public void onActivityResumed(Activity a) { }
+                            @Override public void onActivityStarted(Activity a) { }
+                            @Override public void onActivityPaused(Activity a) { }
+                            @Override public void onActivityStopped(Activity a) { }
+                            @Override public void onActivitySaveInstanceState(Activity a, android.os.Bundle b) { }
+                            @Override public void onActivityDestroyed(Activity a) { }
+                        });
+                Status.armed("隐蔽入口", 1);
+            } else {
+                Status.armed("隐蔽入口", 0);
+            }
+        } catch (Throwable t) {
+            Status.armed("隐蔽入口", 0);
+        }
         Status.note("隐蔽入口", "长按「开启」· LSPosed ▶ · 桌面图标");
     }
 
-    /**
-     * 外部启动跳板（EntryPointActivity）会给微信的 LauncherUI 带一个 extra，
-     * 这里接住它，在微信进程里把面板打开 —— 面板必须跑在微信进程，这是唯一的路子。
-     */
-    private static void hookEntryIntent() {
-        XC_MethodHook hook = new XC_MethodHook() {
-            @Override
-            protected void afterHookedMethod(MethodHookParam p) {
-                try {
-                    Object act = p.thisObject;
-                    if (!(act instanceof Activity)) return;
-                    final Activity a = (Activity) act;
-                    // onNewIntent 时 a.getIntent() 还是旧的那个，新 intent 在参数里
-                    Intent it = null;
-                    if (p.args != null && p.args.length > 0 && p.args[0] instanceof Intent) {
-                        it = (Intent) p.args[0];
-                    } else {
-                        it = a.getIntent();
-                    }
-                    if (it == null) return;
-                    long stamp = it.getLongExtra(EntryPointActivity.EXTRA, -1L);
-                    if (stamp <= 0) return;
-                    it.removeExtra(EntryPointActivity.EXTRA);   // 旋转/重建不再触发第二次
-                    a.getWindow().getDecorView().postDelayed(new Runnable() {
-                        @Override
-                        public void run() {
-                            SettingsPanel.show(a);
-                        }
-                    }, 900L);
-                    bark("entry intent caught");
-                } catch (Throwable ignored) {
-                    // 不打扰宿主
-                }
-            }
-        };
-        try {
-            XposedBridge.hookAllMethods(Activity.class, "onCreate", hook);
-            XposedBridge.hookAllMethods(Activity.class, "onNewIntent", hook);
-        } catch (Throwable ignored) {
-            // 没有就不挂
-        }
-    }
-
     /** 隐藏触发方式：长按关怀模式页的主按钮（比插一行设置项更不显眼）。 */
-    private static void hookCareMode() {
+    private static void maybeCareMode(final Activity a) {
         try {
-            XposedBridge.hookAllMethods(Activity.class, "onCreate", new XC_MethodHook() {
+            if (a == null) return;
+            if (!careModeClass().equals(a.getClass().getName())) return;
+            final View decor = a.getWindow().getDecorView();
+            // onCreate 时布局还没好，推迟一趟
+            decor.post(new Runnable() {
                 @Override
-                protected void afterHookedMethod(MethodHookParam p) {
-                    try {
-                        Object act = p.thisObject;
-                        if (!(act instanceof Activity)) return;
-                        if (!careModeClass().equals(act.getClass().getName())) return;
-
-                        final Activity host = (Activity) act;
-                        final View decor = host.getWindow().getDecorView();
-                        // onCreate 时布局还没好，推迟一趟
-                        decor.post(new Runnable() {
-                            @Override
-                            public void run() {
-                                attachTrigger(decor, host);
-                            }
-                        });
-                    } catch (Throwable ignored) {
-                        // 不打扰宿主页面
-                    }
+                public void run() {
+                    attachTrigger(decor, a);
                 }
             });
-            Log.d(T + "care-mode trigger armed");
         } catch (Throwable ignored) {
-            // 不存在就跳过
+            // 不打扰宿主页面
         }
     }
 
@@ -152,6 +120,7 @@ final class Settings {
             if (v instanceof TextView) {
                 CharSequence label = ((TextView) v).getText();
                 if (label != null && label.toString().contains(TRIGGER_TEXT)) {
+                    Status.hit("隐蔽入口");     // 触发器真的挂上了才算「隐蔽入口」可用
                     v.setLongClickable(true);
                     v.setOnLongClickListener(new View.OnLongClickListener() {
                         @Override

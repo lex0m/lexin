@@ -159,25 +159,72 @@ public class SettingsActivity extends Activity {
 
         LinearLayout st = Ui.card(this);
         Ui.section(this, st, "适配状态", Ui.OK);
-        Map<String, Boolean> all = Status.all();
-        if (all.isEmpty()) {
-            // 跨进程：面板在模块 App 进程里，Status 是微信进程的内存 Map。
-            // 读微信进程推上来的状态镜像（BgProvider.call 写的 status.txt）。
-            String pushed = BgProvider.readStatus(this);
-            if (pushed != null && !pushed.isEmpty()) {
-                for (String line : pushed.split("\n")) {
-                    int eq = line.lastIndexOf('=');
-                    if (eq <= 0) continue;
-                    all.put(line.substring(0, eq), "1".equals(line.substring(eq + 1)));
-                }
+        // 跨进程：面板在模块 App 进程里，Status 是微信进程的内存 Map。
+        // 读微信进程推上来的快照（带版本/时间头），不再只读一个布尔。
+        String pushed = BgProvider.readStatus(this);
+        Map<String, Status.S> rows = Status.parse(pushed);
+        if (rows.isEmpty()) {
+            Map<String, Boolean> local = Status.all();
+            for (Map.Entry<String, Boolean> e : local.entrySet()) {
+                Status.S s = new Status.S();
+                s.armed = e.getValue() ? 1 : 0;
+                s.state = e.getValue() ? Status.ARMED : Status.NONE;
+                rows.put(e.getKey(), s);
             }
         }
-        if (all.isEmpty()) {
+        if (rows.isEmpty()) {
             Ui.infoRow(this, st, "还没有状态：进微信一次让它装上，然后回这里看。", Ui.SUB);
         } else {
-            for (Map.Entry<String, Boolean> e : all.entrySet()) {
-                st.addView(Ui.statusLine(this, e.getValue(), e.getKey(),
-                        e.getValue() ? "已生效" : "未适配（自动跳过）"));
+            // 头部：先告诉用户这是「什么时候、哪个微信版本」的快照 ——
+            // 没有这一行，旧快照会被当成"刚刚成功"（v1.5 最大的误判来源）。
+            String ts = Status.headField(pushed, "ts");
+            String wx = Status.headField(pushed, "wx");
+            String v = Status.headField(pushed, "v");
+            boolean stale = false;
+            long ageMin = -1;
+            try {
+                if (ts != null) {
+                    ageMin = (System.currentTimeMillis() - Long.parseLong(ts)) / 60000L;
+                    stale = ageMin > 10;
+                }
+            } catch (Throwable ignored) {
+                // 时间戳坏了就只显示版本
+            }
+            StringBuilder head = new StringBuilder();
+            if (wx != null && !wx.isEmpty()) head.append("微信 ").append(wx);
+            if (ageMin >= 0) {
+                if (head.length() > 0) head.append(" · ");
+                head.append(ageMin <= 0 ? "刚刚" : ageMin + " 分钟前");
+            }
+            if (v != null && !v.isEmpty()) {
+                if (head.length() > 0) head.append(" · ");
+                head.append("模块 ").append(v);
+            }
+            if (head.length() > 0) {
+                Ui.infoRow(this, st, head.toString()
+                        + (stale ? "（旧快照，可能不是本次启动）" : ""), stale ? Ui.WARN : Ui.SUB);
+            }
+            for (Map.Entry<String, Status.S> e : rows.entrySet()) {
+                Status.S s = e.getValue();
+                boolean good = s.state == Status.HIT;
+                String detail;
+                if (s.state == Status.HIT) {
+                    detail = "已命中 " + s.hits + " 次";
+                    try {
+                        if (s.last > 0) {
+                            long m = (System.currentTimeMillis() - s.last) / 60000L;
+                            detail += m <= 0 ? "（刚刚）" : "（" + m + " 分钟前）";
+                        }
+                    } catch (Throwable ignored) {
+                        // 时间坏了就不显示
+                    }
+                } else if (s.state == Status.ARMED) {
+                    detail = "已挂载 " + s.armed + " 处，未命中";
+                } else {
+                    detail = "未适配（自动跳过）";
+                }
+                if (s.note != null && !s.note.isEmpty()) detail += " · " + s.note;
+                st.addView(Ui.statusLine(this, good, e.getKey(), detail));
             }
         }
         root.addView(st);
@@ -202,7 +249,9 @@ public class SettingsActivity extends Activity {
         try {
             android.content.Intent i = new android.content.Intent(Bridge.ACTION);
             i.setPackage(Entry.HOST);
-            i.putExtra("open_from", System.currentTimeMillis());
+            long stamp = System.currentTimeMillis();
+            i.putExtra("open_from", stamp);
+            i.putExtra(Sig.EXTRA, Sig.of(Bridge.ACTION + "|" + stamp));
             sendBroadcast(i);
             toast("已发送，切回微信即可看到面板");
         } catch (Throwable t) {

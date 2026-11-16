@@ -1,6 +1,7 @@
 package io.github.lex0m.lexin;
 
 import android.app.Activity;
+import android.app.Application;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
@@ -26,33 +27,63 @@ final class MediaSaver {
     private static final int ATTEMPTS = 4;
     private static final long RETRY_MS = 450L;
 
+    private static volatile boolean armed;
+
     static void install() {
+        if (armed) return;          // 重试会再调一次，回调不能注册两份
         Class<?> gallery = Anchors.cls(Anchors.GALLERY);
         if (gallery == null) {
             Status.set("自动查看原图", false);
             return;
         }
         galleryName = gallery.getName();
+        // v1.6：不再 hook framework 的 Activity.onResume（框架热方法是最容易被扫的检测面），
+        // 改用官方生命周期回调 —— 零 hook、零 Xposed 栈帧。
         try {
-            XposedBridge.hookAllMethods(Activity.class, "onResume", new XC_MethodHook() {
+            Application app = (Application) Features.app;
+            if (app == null) {
+                Status.armed("自动查看原图", 0);
+                return;
+            }
+            app.registerActivityLifecycleCallbacks(new Application.ActivityLifecycleCallbacks() {
                 @Override
-                protected void afterHookedMethod(MethodHookParam param) {
+                public void onActivityResumed(Activity act) {
                     try {
-                        Object act = param.thisObject;
-                        if (!(act instanceof Activity)) return;
-                        if (!galleryName.equals(act.getClass().getName())) return;
+                        if (act == null) return;
+                        Log.d(T + "resume " + act.getClass().getName());
+                        if (!isGallery(act)) return;
                         if (!Prefs.onDefault(Prefs.K_MEDIA)) return;
-                        schedule((Activity) act);
+                        schedule(act);
                     } catch (Throwable ignored) {
                         // 仅外观，不打扰浏览页
                     }
                 }
+
+                @Override public void onActivityCreated(Activity a, android.os.Bundle b) { }
+                @Override public void onActivityStarted(Activity a) { }
+                @Override public void onActivityPaused(Activity a) { }
+                @Override public void onActivityStopped(Activity a) { }
+                @Override public void onActivitySaveInstanceState(Activity a, android.os.Bundle b) { }
+                @Override public void onActivityDestroyed(Activity a) { }
             });
-            Status.set("自动查看原图", true);
+            armed = true;
+            Status.armed("自动查看原图", 1);
             Log.d(T + "armed on " + galleryName);
         } catch (Throwable t) {
-            Status.set("自动查看原图", false);
+            Status.armed("自动查看原图", 0);
         }
+    }
+
+    /** 画廊页判定：运行期可能是锚点类的子类，按父类链匹配。 */
+    private static boolean isGallery(Activity act) {
+        String want = galleryName;
+        if (act == null || want == null) return false;
+        Class<?> k = act.getClass();
+        while (k != null && k != Object.class) {
+            if (want.equals(k.getName())) return true;
+            k = k.getSuperclass();
+        }
+        return false;
     }
 
     private static void schedule(final Activity act) {
@@ -67,6 +98,7 @@ final class MediaSaver {
                         if (done[0]) return;                 // 已经切到原图，别再重复点
                         if (clickOriginal(root)) {
                             done[0] = true;
+                            Status.hit("自动查看原图");    // 真的点到「查看原图」才记命中
                             Log.d(T + "original pressed");
                         }
                     } catch (Throwable ignored) {

@@ -167,9 +167,24 @@ final class SettingsPanel {
         // ── 适配状态 ──
         LinearLayout st = Ui.card(host);
         Ui.section(host, st, "当前微信适配状态", Ui.OK);
-        for (Map.Entry<String, Boolean> e : Status.all().entrySet()) {
-            st.addView(Ui.statusLine(host, e.getValue(), e.getKey(),
-                    e.getValue() ? "已生效" : "未适配（该功能自动跳过）"));
+        // v1.6：微信内面板能看到真实命中数（同一进程），不再只报"已生效"
+        for (Map.Entry<String, Probe.Row> e : Probe.all().entrySet()) {
+            Probe.Row r = e.getValue();
+            boolean good = r.state() == Status.HIT;
+            String detail;
+            if (r.state() == Status.HIT) {
+                detail = "已命中 " + r.hits + " 次";
+                if (r.last > 0) {
+                    long m = (System.currentTimeMillis() - r.last) / 60000L;
+                    detail += m <= 0 ? "（刚刚）" : "（" + m + " 分钟前）";
+                }
+            } else if (r.state() == Status.ARMED) {
+                detail = "已挂载 " + r.armed + " 处，未命中";
+            } else {
+                detail = "未适配（该功能自动跳过）";
+            }
+            if (r.note != null && !r.note.isEmpty()) detail += " · " + r.note;
+            st.addView(Ui.statusLine(host, good, e.getKey(), detail));
         }
         // actionRow 内部已经把这一行加进卡片了，这里不要再 addView 一次
         Ui.actionRow(host, st, "独立设置页",
@@ -405,10 +420,16 @@ final class SettingsPanel {
             @Override
             public void run() {
                 try {
-                    // v1.5：图在模块侧，删它要经过 provider（微信进程不再碰自己的目录）
-                    host.getContentResolver().delete(BgProvider.uriOf(BgProvider.PATH_BG), null, null);
+                    // 两处都删：微信侧本地文件是现在的主路径（provider 在微信进程解析不到）
+                    new java.io.File(host.getFilesDir(), Beautify.BG_FILE).delete();
+                    new java.io.File(host.getFilesDir(), Beautify.CARD_FILE).delete();
                 } catch (Throwable ignored) {
                     // 忽略
+                }
+                try {
+                    host.getContentResolver().delete(BgProvider.uriOf(BgProvider.PATH_BG), null, null);
+                } catch (Throwable ignored) {
+                    // provider 不可达就算了
                 }
                 Storage.setStr(Beautify.K_BG, "");
                 toast(host, "已清除背景");

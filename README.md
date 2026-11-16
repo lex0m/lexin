@@ -4,10 +4,10 @@
 
 **微信界面美化 + 本地功能增强** · Xposed / LSPosed 模块
 
-![version](https://img.shields.io/badge/version-1.5.0-4A6CF7?style=flat-square)
+![version](https://img.shields.io/badge/version-1.6.2-4A6CF7?style=flat-square)
 ![platform](https://img.shields.io/badge/Android-12%20~%2016-3DDC84?style=flat-square&logo=android&logoColor=white)
 ![wechat](https://img.shields.io/badge/微信-8.0.72%20~%208.0.80-07C160?style=flat-square&logo=wechat&logoColor=white)
-![size](https://img.shields.io/badge/APK-638%20KB-8A8F9A?style=flat-square)
+![size](https://img.shields.io/badge/APK-670%20KB-8A8F9A?style=flat-square)
 ![license](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
 
 包名 `io.github.lex0m.lexin` · 作者 lex · 纯 Java · 无 Gradle
@@ -26,7 +26,7 @@
 - **本地功能**：防撤回、朋友圈保留、去广告、自动原图、步数修改、一键转发……
   全部**在设备上完成**，不上传、不伪造、不改一条上行报文。
 
-一个 638 KB 的 APK，没有 Gradle 工程、没有第三方依赖、没有后台服务。
+一个 670 KB 的 APK，没有 Gradle 工程、没有第三方依赖、没有后台服务。
 
 ---
 
@@ -120,6 +120,11 @@
 方法签名」三层特征找落点，结果缓存到本机，下次启动零成本。找不到的功能安静跳过，
 不崩、也不影响微信本身。
 
+**面板显示的是三态，不是布尔**：`未适配` / `已挂载未命中` / `已命中 N 次`。
+中间那一档是重点 —— 微信 8.0.80 用 Tinker 热修，真正执行的类是补丁 dex 里那份，
+用框架给的 ClassLoader 解析出来的"死类"照样能挂 hook、照样算成功，但回调永远不会触发。
+只有「命中数在涨」才算真的在工作。
+
 给新版本补一张表（可选，让首次启动直接命中）：
 
 ```sh
@@ -162,6 +167,38 @@ sh tools/build-audio.sh --test   # 重编音频库并自测
 ---
 
 ## 更新日志
+
+### v1.6.2（2026-11-16）— 全盘复审：自检复活 + 背景图通道 + 构建可复现
+
+这一版没有新功能，只修**"装上了、面板也说好了，但就是不工作"**。
+
+**两个阻断**
+- **自检机制自己就是坏的**：`SelfCheck` 用 `getDeclaredMethod("pulse")` 找方法，
+  但 R8 把 `pulse` 改名成了 `le`（mapping 里 `void pulse() -> le`）⇒ 发布包里必然抛
+  `NoSuchMethodException`。真机证据：`status.txt` 里 `hook 活性 armed=1 / hits=0`，
+  37 分钟一次没涨（自检 15 秒一次，该有 148 次）。改成**按签名找**（`static void`、零参数）
+  —— R8 改不了签名。
+- **「重新自动适配」从来不扫**：`Anchors.forget()` 的 `AutoScan.reset()` 把待扫槽位清空，
+  紧接着 `schedule()` 看到空表直接 return，一次扫描都不发生，toast 却说"已开始"。
+
+**高危**
+- `ForwardPlus.hookMenuSelect` 不校验返回类型就 `setResult(null)`：挑中 `(MenuItem)->boolean`
+  的重载会拆箱 `null` → **崩微信**（`getDeclaredMethods` 顺序不保证）
+- 两处 `getOutline` 缺 try/catch：框架在渲染线程调，首次布局前 0×0，`setRoundRect` 抛异常
+  直接漏进微信绘制流程
+- `applyCardHeight` 的守卫是**空 if 块**：`WRAP_CONTENT` 被改写成绝对像素，多行文本被截断
+- **背景图三处全走 `content://`**，而微信 targetSdk 34 且没有 `QUERY_ALL_PACKAGES`
+  （已用 `dumpsys package` 核实），解析不到 authority ⇒ 面板选图必失败、背景画不出来。
+  改成写/读都走微信自己 `files/` 的点号文件
+- 老背景图迁移失败也照 `delete()` ⇒ 用户的图直接消失
+- `ThemePack` 的 `FileReader` 泄漏（最终 "Too many open files"）、`image()` 复用同一个
+  `Drawable` 实例（bounds 互抢、错图）
+
+**构建可复现**
+`build.sh` 以前每次用随机锚点密钥 ⇒ 同一份源码连编三次三个哈希，`VERSIONS.md` 记的
+哈希永远对不上。改成 `sha256("lexin-anchor:" + 项目私盐 + 源码指纹)` 派生，盐在
+`keystore/anchor.salt`（不入库、不进包）。**源码不变 ⇒ 包完全一致**（已实测连跑两次相同）。
+详见 [`更新说明-v1.6.2.md`](更新说明-v1.6.2.md)。
 
 ### v1.5.0（2026-11-10）— 适配微信 8.0.80 + 环境隐蔽
 

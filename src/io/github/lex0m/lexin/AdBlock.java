@@ -27,7 +27,7 @@ final class AdBlock {
         int sns = blockMomentsAd();
 
         boolean any = open + sns > 0;
-        Status.set("去广告", any);
+        Status.armed("去广告", open + sns);
         Status.note("去广告", any
                 ? "拦截点 " + (open + sns) + " 个（开屏/小程序 " + open + " · 朋友圈 " + sns + "）"
                 : "当前微信版本未适配");
@@ -55,6 +55,7 @@ final class AdBlock {
                         @Override
                         protected void beforeHookedMethod(MethodHookParam p) {
                             if (!Prefs.onDefault(Prefs.K_ADS)) return;
+                            Status.hit("去广告");        // 广告对象真的被构造过 → 拦截点有效
                             p.setResult(null);          // 构造不成立 → 这个广告条目就没了
                             Log.d(T + "blocked moments ad");
                         }
@@ -75,6 +76,7 @@ final class AdBlock {
                         @Override
                         protected void beforeHookedMethod(MethodHookParam p) {
                             if (!Prefs.onDefault(Prefs.K_ADS)) return;
+                            Status.hit("去广告");
                             p.setResult(null);          // 跳过方法体：广告数据不落地
                             Log.d(T + "blocked moments ad feed");
                         }
@@ -105,6 +107,7 @@ final class AdBlock {
                         @Override
                         protected void beforeHookedMethod(MethodHookParam p) {
                             if (!Prefs.onDefault(Prefs.K_ADS)) return;
+                            Status.hit("去广告");
                             p.setResult(Boolean.FALSE);
                         }
                     });

@@ -43,7 +43,9 @@ public class EntryPointActivity extends Activity {
         try {
             Intent i = new Intent(Bridge.ACTION);
             i.setPackage(Entry.HOST);
-            i.putExtra(EXTRA, System.currentTimeMillis());
+            long stamp = System.currentTimeMillis();
+            i.putExtra(EXTRA, stamp);
+            i.putExtra(Sig.EXTRA, Sig.of(Bridge.ACTION + "|" + stamp));
             sendBroadcast(i);
             sent = true;
         } catch (Throwable ignored) {

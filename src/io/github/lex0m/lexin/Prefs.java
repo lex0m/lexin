@@ -6,6 +6,7 @@ import android.content.Context;
 final class Prefs {
 
     static final String K_RECALL = Storage.K_RECALL;
+    static final String K_RECALL_SELF = Storage.K_RECALL_SELF;
     static final String K_MOMENTS = Storage.K_MOMENTS;
     static final String K_ADS = Storage.K_ADS;
     static final String K_MEDIA = Storage.K_MEDIA;
@@ -47,7 +48,9 @@ final class Prefs {
         return K_RECALL.equals(key) || K_MOMENTS.equals(key) || K_ADS.equals(key)
                 || K_MEDIA.equals(key) || K_LIMITS.equals(key) || K_SCAN.equals(key)
                 || K_STEALTH.equals(key)                                   // 环境隐蔽默认开：不是功能，是前提
-                || K_FWD_MENU.equals(key) || K_FWD_SELECT.equals(key);   // 转发增强默认开（本地 UI 功能，零联网）
+                || K_DICE.equals(key) || K_FIST.equals(key)                // 骰子/猜拳默认开（用户 2026-11-10 要求：别再每次手动开）
+                || K_FWD_MENU.equals(key) || K_FWD_SELECT.equals(key)    // 转发增强默认开（本地 UI 功能，零联网）
+                || K_RECALL_SELF.equals(key);                            // 自己撤回也拦（用户要求：不然不知道有没有生效）
     }
 
     /** 带默认值读取：hook 路径一律用这个，省得两处默认值写岔。 */

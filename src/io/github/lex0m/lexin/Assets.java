@@ -150,8 +150,37 @@ final class Assets {
         return drawable(shortName) != null;
     }
 
-    /** 读模块 APK 里的文本资源（锚点表 anchors.json 走这里）。 */
+    /** 读模块 APK 里的文本资源。 */
     static String text(String path) {
+        byte[] raw = bytes(path);
+        if (raw == null) return null;
+        try {
+            return new String(raw, "UTF-8");
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    /**
+     * 锚点表（v1.6.0：优先读加密后的 anchor.bin）。
+     *
+     * 明文 anchors.json 只为开发/降级保留：构建期 package.py 会把明文换成密文，
+     * 正式包里根本不存在 anchors.json 这个条目。
+     */
+    static String anchorText() {
+        byte[] raw = bytes("anchor.bin");
+        if (raw != null && raw.length > 0) {
+            String s = AnchorCodec.decrypt(raw);
+            if (s != null && !s.isEmpty()) {
+                source = "zip（加密表）";
+                return s;
+            }
+        }
+        return null;   // 正式包只有密文：明文回退会让 dex 里留下 "anchors.json" 这个特征串
+    }
+
+    /** 读 asset 的原始字节。公开 API（直读 zip）优先，隐藏 API 兜底。 */
+    static byte[] bytes(String path) {
         InputStream in = null;
         try {
             // 先公开 API（直读 zip）——新版安卓上这条路不会被隐藏 API 策略拦
@@ -166,7 +195,7 @@ final class Assets {
             int n;
             while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
             source = "zip（公开 API 直读）";
-            return new String(out.toByteArray(), "UTF-8");
+            return out.toByteArray();
         } catch (Throwable ignored) {
             return null;
         } finally {

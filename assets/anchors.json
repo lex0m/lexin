@@ -150,6 +150,17 @@
     "CheckData path[%s] blocksize:%s blockcount:%s availcount:%s"
    ]
   },
+  "dice_builder": {
+   "emitMethod": "dice_",
+   "note": "骰子/猜拳消息构造：8.0.80 = bo5.b1#a",
+   "pkg": "",
+   "scan": false,
+   "simple": "^[a-z0-9]{1,4}$",
+   "strings": [
+    "dice_",
+    "getMd5(...)"
+   ]
+  },
   "emoji_panel": {
    "method": "a(android.view.View,android.content.Context,int,*):void",
    "pkg": "",
@@ -221,11 +232,43 @@
     "MicroMsg.QBarStringHandler"
    ]
   },
+  "revoke_handler": {
+   "emitMethod": "doRevokeMsg revokeFlag=",
+   "note": "撤回处理器：8.0.80 = w41.u#c（开源 wechat-anti-recall 同款节点）",
+   "pkg": "",
+   "scan": false,
+   "simple": "^.+$",
+   "strings": [
+    "doRevokeMsg revokeFlag=",
+    "doRevokeMsg xmlSrvMsgId="
+   ]
+  },
   "rng": {
    "method": "Q(int,int):int",
    "pkg": "com.tencent.mm.sdk.platformtools",
    "scan": true,
    "simple": "^[a-z0-9]{1,4}$"
+  },
+  "send_scene": {
+   "note": "NetSceneSendMsg：8.0.80 = q61.s0（doScene）",
+   "pkg": "",
+   "scan": false,
+   "simple": "^.+$",
+   "strings": [
+    "MicroMsg.NetSceneSendMsg",
+    "/cgi-bin/micromsg-bin/newsendmsg"
+   ]
+  },
+  "send_service": {
+   "emitMethod": "MicroMsg.SendMsgService",
+   "note": "外发消息服务：8.0.80 = s61.b0#Nj(List)",
+   "pkg": "",
+   "scan": false,
+   "simple": "^.+$",
+   "strings": [
+    "MicroMsg.SendMsgService",
+    "send msgs req exceed max limit"
+   ]
   },
   "sns_ad": {
    "fields": "AD_ACTION_TYPE_LANDING_PAGE,AD_ACTION_TYPE_WEB",
@@ -244,6 +287,10 @@
    "note": "一个版本里可能同时存在多个库对象，全挂上",
    "pkg": "",
    "scan": true,
+   "seed": [
+    "t93.l",
+    "ae.s"
+   ],
    "simple": "^[a-z0-9]{1,4}$"
   },
   "sns_db2": {
@@ -306,6 +353,16 @@
    "strings": [
     "MicroMsg.TransformComponent",
     "[onChattingPause]"
+   ]
+  },
+  "voice_path": {
+   "emitMethod": "getVoiceFullPath",
+   "note": "语音路径工具：8.0.80 = mc0.b#hk（Uj 直接收 f9）",
+   "pkg": "",
+   "scan": false,
+   "simple": "^.+$",
+   "strings": [
+    "getVoiceFullPath"
    ]
   },
   "xposed_check": {
@@ -791,6 +848,7 @@
     "chatting_context": "wk5.d",
     "client_check": "w41.u#j7",
     "core_storage": "zp0.b0",
+    "dice_builder": "bo5.b1#a",
     "emoji_panel": "yr.p",
     "gallery": "com.tencent.mm.ui.chatting.gallery.ImageGalleryUI",
     "matrix_hookcheck": "pv0.u0#a",
@@ -799,9 +857,12 @@
     "msg": "com.tencent.mm.storage.f9",
     "net_scene_queue": "com.tencent.mm.modelbase.s1",
     "qr_scan": "r84.v",
+    "revoke_handler": "w41.u#c",
     "rng": "com.tencent.mm.sdk.platformtools.b9",
+    "send_scene": "q61.s0",
+    "send_service": "s61.b0#Nj",
     "sns_ad": "com.tencent.mm.plugin.sns.storage.ADInfo",
-    "sns_db": "ae.s",
+    "sns_db": "t93.l",
     "sns_db2": "t93.l",
     "sport_detector": "com.tencent.mm.plugin.sport.model.g",
     "sport_push_detector": "com.tencent.mm.plugin.sport.model.m",
@@ -809,7 +870,16 @@
     "sqlite_db_wrapper": "ai5.d0",
     "sysmsg_parser": "com.tencent.mm.sdk.platformtools.ja",
     "transform_component": "com.tencent.mm.ui.chatting.component.gp",
-    "xposed_check": "com.tencent.mm.app.j3#a"
+    "voice_path": [
+     "mc0.b#fk",
+     "mc0.b#hk"
+    ],
+    "xposed_check": "com.tencent.mm.app.j3#a",
+    "stealth_extra": [
+     "sn0.n#a",
+     "sn0.n#b",
+     "sn0.n#c"
+    ]
    }
   }
  }

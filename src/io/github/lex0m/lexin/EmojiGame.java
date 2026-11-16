@@ -7,6 +7,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
 
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -27,9 +28,9 @@ final class EmojiGame {
     private static final String T = "svc-emoji: ";
 
     /** 表情面板里骰子的 kind id（8.0.x 实测）。 */
-    private static final int KIND_DICE = 429;
+    private static final String MD5_DICE = "08f223fa83f1ca34e143d1e580252c7c";
     /** 猜拳的 kind id。 */
-    private static final int KIND_FIST = 428;
+    private static final String MD5_MORRA = "9bd1281af3a31710a45b84d736363691";
     /** 菜单下标（1=石头 2=剪刀 3=布）-> 宿主内部取值。 */
     private static final int[] FIST_ORDER = {0, 1, 0, 2};
 
@@ -72,10 +73,9 @@ final class EmojiGame {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) {
                     try {
-                        int k = Silent.asInt(param.args[2]);
-                        if (k != KIND_DICE && k != KIND_FIST) return;
-
-                        boolean dice = (k == KIND_DICE);
+                        Boolean game = diceGame(param);
+                        if (game == null) return;
+                        boolean dice = game.booleanValue();
                         if (dice && !Prefs.onDefault(Prefs.K_DICE)) return;
                         if (!dice && !Prefs.onDefault(Prefs.K_FIST)) return;
                         if (!prompting.compareAndSet(false, true)) {
@@ -98,6 +98,33 @@ final class EmojiGame {
     }
 
     /** 随机数入口：Q(int,int) -> int。 */
+    /**
+     * 判断这次点的是不是骰子/猜拳 —— 照抄 wcx 的做法：面板点击方法的第 4 个参数是回调对象，
+     * 它身上有一个 IEmojiInfo 字段，取 md5 比对即可（跟列表位置、kind id 都无关）。
+     * TRUE=骰子 / FALSE=猜拳 / null=不是游戏。
+     */
+    private static Boolean diceGame(XC_MethodHook.MethodHookParam p) {
+        try {
+            Object cb = p.args.length > 3 ? p.args[3] : null;
+            if (cb == null) return null;
+            Object emoji = null;
+            for (Field f : cb.getClass().getDeclaredFields()) {
+                if (S.WX_P6.equals(f.getType().getName())) {
+                    f.setAccessible(true);
+                    emoji = f.get(cb);
+                    break;
+                }
+            }
+            if (emoji == null) return null;
+            Object md5 = emoji.getClass().getMethod("getMd5").invoke(emoji);
+            if (MD5_DICE.equals(md5)) return Boolean.TRUE;
+            if (MD5_MORRA.equals(md5)) return Boolean.FALSE;
+            return null;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
     private static int hookRng() {
         Class<?> owner = Anchors.cls(Anchors.RNG);
         Method q = Silent.method(owner, "Q", int.class, int.class);
@@ -112,6 +139,8 @@ final class EmojiGame {
                 protected void afterHookedMethod(MethodHookParam param) {
                     // 放在之后：让宿主先算完，内部状态一致，我们只覆盖展示结果
                     try {
+                        int type = Silent.asInt(param.args[0]);
+                        if (type != 2 && type != 5) return;
                         int v = parked.getAndSet(-1);
                         if (v >= 0 && System.currentTimeMillis() < parkedExpiry) {
                             param.setResult(v);
@@ -144,6 +173,10 @@ final class EmojiGame {
                                 @Override
                                 public void onClick(DialogInterface d, int which) {
                                     if (which > 0) {
+                                        // 菜单下标不能直接当宿主取值：骰子是 which-1（0..5），
+                                        // 猜拳要过 FIST_ORDER（1=石头 2=剪刀 3=布 -> 宿主值）。
+                                        // v1.6.0 重构时把这两步映射丢了，FIST_ORDER 定义了从没用过
+                                        // —— 猜拳石头/布错位、骰子整体偏移一格。按 v1.3 的实现改回来。
                                         parked.set(dice ? (which - 1) : FIST_ORDER[which]);
                                         parkedExpiry = System.currentTimeMillis() + 5000L;
                                     }

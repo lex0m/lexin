@@ -7,6 +7,7 @@
   · 所有条目用固定时间戳、固定顺序 —— 同样的输入产出同样的 zip 字节
   · assets/build-info.txt 带版本 + buildId（源码指纹），交付包可追溯
 """
+import hashlib
 import io
 import os
 import sys
@@ -20,6 +21,16 @@ STAMP = (2026, 1, 1, 0, 0, 0)
 EXCLUDE = {"assets/make-icons.js", "assets/logo-src.png"}
 SKIP_SUFFIX = (".bak", ".orig", ".rej", ".tmp", ".swp")
 SKIP_NAMES = (".DS_Store", "Thumbs.db")
+
+
+def _keystream(key, n):
+    """SHA-256 计数器流：Java 侧 AnchorCodec 用同一套推导。"""
+    out = bytearray()
+    i = 0
+    while len(out) < n:
+        out += hashlib.sha256(key + i.to_bytes(4, "big")).digest()
+        i += 1
+    return bytes(out[:n])
 
 
 def wanted(name):
@@ -74,6 +85,8 @@ def main(argv):
         # ③ assets（含 xposed_init；主题素材都在包里，不往微信目录写文件）
         assets = os.path.join(project, "assets")
         shipped = []
+        # 锚点表：明文不进包。构建期换成密文 anchor.bin（密钥来自 LEXIN_ASSET_KEY）。
+        asset_key = os.environ.get("LEXIN_ASSET_KEY", "")
         for dirpath, dirs, files in os.walk(assets):
             dirs.sort()
             for fn in sorted(files):
@@ -82,6 +95,15 @@ def main(argv):
                 full = os.path.join(dirpath, fn)
                 rel = os.path.relpath(full, assets).replace(os.sep, "/")
                 if "assets/" + rel in EXCLUDE:
+                    continue
+                if rel == "anchors.json":
+                    if not asset_key:
+                        raise SystemExit("LEXIN_ASSET_KEY 未设置：拒绝把明文锚点表打进包")
+                    raw = open(full, "rb").read()
+                    key = bytes.fromhex(asset_key)
+                    enc = bytes(a ^ b for a, b in zip(raw, _keystream(key, len(raw))))
+                    add_bytes(dst, "assets/anchor.bin", enc)
+                    shipped.append("anchor.bin")
                     continue
                 add_file(dst, "assets/" + rel, full)
                 shipped.append(rel)
