@@ -11,7 +11,10 @@ v1.6.2：全盘复审 —— 自检复活 + 背景图通道 + 构建可复现
    发布包里这句必然抛 NoSuchMethodException。
    真机证据：status.txt 里 hook 活性 armed=1 / hits=0，37 分钟一次没涨
    （自检是 15 秒一次，该有 148 次）。
-   修法：不按名字找，按签名找（static void、零参数、声明在 Probe 里）—— R8 改不了签名。
+   第一版修法（按签名找）在真机上仍然失败：R8 把 pulse() 整个方法删了
+   —— 它只往 Probe.beat 里 +1，而 beat 全仓库没有读者，R8 判定死代码，连方法一起裁掉。
+   最终修法三层：proguard 加 keep（pulse + beat）、自检 tick 读一次 beat、找方法仍按签名。
+   真机验证：hook 活性 从 armed=0/找不到 pulse 变成 armed=1/hook 机制在用。
 
 2. 面板「重新自动适配」从来不扫。Anchors.forget() 第一件事是 AutoScan.reset()，
    把 unresolved 清空 → 紧接着 schedule() 看到空表直接 return，一次扫描都不发生，

@@ -33,6 +33,15 @@
 # 我们自己在代码里按字符串查的类
 -keep class io.github.lex0m.lexin.HostInfo { *; }
 
+# ★ 活性自检：SelfCheck 要 hook 这个方法、再反射调用它。
+#   R8 判定 `pulse()` 只往一个没人读的 int 里 +1（`beat` 全仓库无读者）⇒ **整个方法被删掉**，
+#   于是运行时按签名也找不到，面板「hook 活性」永远「未适配」——判据本身失真。
+#   这里把方法与其计数字段都留住（SelfCheck 的 tick 里也会读一次 beat，双保险）。
+-keepclassmembers class io.github.lex0m.lexin.Probe {
+    static void pulse();
+    static int beat;
+}
+
 # ── 混淆强度 ────────────────────────────────────────────────
 # 类名收进根包、抹掉内部类层级线索；被 keep 的类不受影响
 -repackageclasses 'x'

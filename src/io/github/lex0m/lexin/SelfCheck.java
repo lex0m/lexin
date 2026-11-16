@@ -79,9 +79,15 @@ final class SelfCheck {
             try {
                 int before = Probe.hits(F);
                 Method m = pulse;
-                Log.d("svc-selfcheck: tick before=" + before + " pulse=" + (m != null));
+                // 读一次 beat：让 R8 看到「这个字段有人读」，别把 pulse() 连带裁掉
+                int beat = Probe.beat;
+                Log.d("svc-selfcheck: tick before=" + before + " pulse=" + (m != null) + " beat=" + beat);
                 if (m != null) m.invoke(null);      // 反射调用：绕过内联
                 int after = Probe.hits(F);
+                if (after == before && Probe.beat > beat) {
+                    // 方法体真的跑了，但 hook 回调没进来 → hook 被摘掉了（比"没调用"更硬的证据）
+                    Storage.diag("selfcheck: body ran but hook missed");
+                }
                 Log.d("svc-selfcheck: tick after=" + after);
                 if (after == before && before > 0) {
                     // 之前命中过、这次没命中 → 不是"没被调用"，是 hook 被拿掉了
