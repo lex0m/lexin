@@ -167,14 +167,22 @@ final class AntiRecall {
         restore();
         boolean core = hookSysmsg();
         boolean direct = hookRevokeHandler();
-        int mark = hookBinder() ? 1 : 0;
-        // 能走版本表的绑定器就不挂兜底；兜底也只在微信自己的适配器类里找（不碰 framework）。
-        if (mark == 0) mark = hookAdapters();
+        // ★ 两条路**都挂**，不再"绑定器成功就不挂兜底"。
+        //
+        // 8.0.80 实测：`jo.b#h` 能挂上（armed=1），但运行期一次都没被调用
+        // （hits 恒 0）—— 微信换了行绑定路径，老方法还在只是没人调。
+        // 以前 mark!=0 就跳过适配器兜底，于是两条路一起哑掉，撤回标记永远画不出来。
+        // 现在两条都挂，谁真的被调用算谁的（同一次绑定重复 mark 是幂等的）。
+        boolean binderOk = hookBinder();
+        int adapterOk = hookAdapters();
+        int mark = (binderOk || adapterOk > 0) ? 1 : 0;
         boolean any = core || direct;
         // v1.6：挂载数如实记（sysmsg 上游 + doRevokeMsg 下游 + 行标记），
         // 是否真的生效看 Probe 的命中数，不再用一个布尔概括全部。
         Status.armed("消息防撤回", (core ? 1 : 0) + (direct ? 1 : 0));
         Status.armed("撤回标记", mark);
+        Status.note("撤回标记", "绑定器 " + (binderOk ? "已挂" : "未挂")
+                + " · 适配器 " + adapterOk + " 个");
         Status.note("消息防撤回", any
                 ? ("撤回已在本地失效" + (direct ? "（直接拦 doRevokeMsg）" : "（sysmsg 抹类型）"))
                 : "当前微信版本未适配");
@@ -422,7 +430,8 @@ final class AntiRecall {
             adapterName = c.getName();
             for (final Method m : wxMethods(c)) {
                 final String name = m.getName();
-                if (!"onBindViewHolder".equals(name) && !"getView".equals(name)) continue;
+                if (!"onBindViewHolder".equals(name) && !"getView".equals(name)
+                        && !isBindByShape(m)) continue;
                 try {
                     m.setAccessible(true);
                     XposedBridge.hookMethod(m, new XC_MethodHook() {
@@ -463,6 +472,54 @@ final class AntiRecall {
         }
         Log.d(T + "wx adapter hooks=" + n);
         return n;
+    }
+
+    /**
+     * 按**签名**认行绑定方法，不认名字。
+     *
+     * 8.0.80 把 `onBindViewHolder(ViewHolder,int)` 改名成了 `O`（mapping 实测：
+     * {@code k#O(Landroidx/recyclerview/widget/k3;, I)V}），代码里只按名字找 ⇒
+     * 这条兜底路径一次都没挂上过，`撤回标记` 永远「已挂载未命中」。
+     * 签名不会被混淆改掉，所以按签名找。
+     */
+    private static boolean isBindByShape(Method m) {
+        if (m.getReturnType() != void.class) return false;
+        Class<?>[] pt = m.getParameterTypes();
+        if (pt.length != 2) return false;
+        if (pt[1] != int.class) return false;
+        if (pt[0].isPrimitive()) return false;
+        return looksLikeViewHolder(pt[0]);
+    }
+
+    /**
+     * 「ViewHolder 形状」：构造器吃一个 View，或者能拿到 itemView。
+     *
+     * 不能按类名认 —— 微信把自带的 androidx 也一起混淆了：8.0.80 里
+     * `RecyclerView$ViewHolder` 实际叫 `androidx.recyclerview.widget.k3`
+     * （方法 `addFlags`/`flagRemovedAndOffsetPosition` 能对上）。
+     * 按形状认，版本漂移也不怕。
+     */
+    private static boolean looksLikeViewHolder(Class<?> k) {
+        Class<?> c = k;
+        while (c != null && c != Object.class) {
+            try {
+                for (java.lang.reflect.Constructor<?> ct : c.getDeclaredConstructors()) {
+                    Class<?>[] ps = ct.getParameterTypes();
+                    if (ps.length >= 1 && View.class.isAssignableFrom(ps[0])) return true;
+                }
+            } catch (Throwable ignored) {
+                // 继续
+            }
+            try {
+                for (Field f : c.getDeclaredFields()) {
+                    if (View.class.isAssignableFrom(f.getType())) return true;
+                }
+            } catch (Throwable ignored) {
+                // 继续
+            }
+            c = c.getSuperclass();
+        }
+        return false;
     }
 
     /**

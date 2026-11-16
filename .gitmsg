@@ -1,75 +1,48 @@
-v1.6.2：全盘复审 —— 自检复活 + 背景图通道 + 构建可复现
+v1.6.3：三个「面板说好了、实际不工作」的功能真修好了
 
-这一版没有新功能。把 v1.6.0/1.6.1 那套「判据」重读了一遍，专找三种病：
-装上了但面板说好了却不工作、会让微信卡崩、会悄悄丢数据。复审查出 62 条，
-逐条对代码验证后修了 21 条，其余列进「已知未修」。
+只修三个用户亲口报的功能：自动查看原图 / 骰子·猜拳 / 撤回标记。
+三个的共同症状完全一样：armed=1（hook 装上了）、hits=0（回调一次没被调用）。
 
-【两个阻断】
+【自动查看原图】
+用户的现场观察是定位关键：自己在微信里正常点图不会下原图，但从别的 App 切回来、
+微信里已经开着图反而会触发。这说明触发点找错了 —— 原来只在 Activity.onResume 时
+才开始找「查看原图」按钮，而 8.0.80 在 App 内部点开图片**不会触发 Activity resume**
+（图片预览是在当前页面里换视图）。所以：正常点图不扫描，切回来才扫描。
+改成页面停留期间持续观察（resume 起 pause 停，600ms 一轮，最多 5 分钟兜底）。
+顺带修了两个具体问题：遍历上限 500 太小（现场数据「节点 501 · 候选 3」说明撞上限就停了）；
+候选被拒没有原因记录。
+真机：hits=10，20 个候选 / 1475 个节点，点图自动下原图。
 
-1. 自检机制自己就是坏的。SelfCheck 用 Probe.class.getDeclaredMethod("pulse") 找方法，
-   但 R8 把 pulse 改名成了 le（mapping.txt: void pulse() -> le）——
-   发布包里这句必然抛 NoSuchMethodException。
-   真机证据：status.txt 里 hook 活性 armed=1 / hits=0，37 分钟一次没涨
-   （自检是 15 秒一次，该有 148 次）。
-   第一版修法（按签名找）在真机上仍然失败：R8 把 pulse() 整个方法删了
-   —— 它只往 Probe.beat 里 +1，而 beat 全仓库没有读者，R8 判定死代码，连方法一起裁掉。
-   最终修法三层：proguard 加 keep（pulse + beat）、自检 tick 读一次 beat、找方法仍按签名。
-   真机验证：hook 活性 从 armed=0/找不到 pulse 变成 armed=1/hook 机制在用。
+【骰子/猜拳】三个 bug 叠在一起
+1. 判定方式失效：旧代码从第 4 个参数找 IEmojiInfo，8.0.80 那个参数变成 vr.u0
+   （Kotlin lambda，只有 int 字段）⇒ 永远判定不是游戏 ⇒ 选择框从不弹。
+   改成看第 3 个参数 kind id。真机确认 429=骰子。
+2. 入口只挂一个且挂错：同签名「(View,Context,int,cb)->void」在 8.0.80 有 14 处，
+   锚点表只给 yr.p，代码还只挑第一个。改成锚点类 + 同族 7 类全挂、每个方法都挂。
+3. 重放调错方法：放行时用静态字段 panelMethod，现在挂了十几个入口，它指向最后一个
+   挂上的而不是这次被拦的那个 ⇒ 重放等于没干。改用 param.method。
+真机：hits=2 · armed=2 · kind=429，选完能真的投出去。
 
-2. 面板「重新自动适配」从来不扫。Anchors.forget() 第一件事是 AutoScan.reset()，
-   把 unresolved 清空 → 紧接着 schedule() 看到空表直接 return，一次扫描都不发生，
-   但 toast 照样说"已开始重新适配"。
-   修法：reset 之后把所有有规则可扫的槽位重新登记。
+【撤回标记】
+原逻辑「绑定器挂成功就不挂适配器兜底」，但 8.0.80 上 jo.b#h 能挂上却一次没被调用
+（微信换了行绑定路径，老方法还在只是没人调）⇒ 两条路一起哑掉。
+另外适配器按名字找 onBindViewHolder，而 8.0.80 把它改名成 O。
+改成两条路都挂 + 按形状认 ViewHolder（返回 void、两参、第二个 int、第一个是
+ViewHolder 形状），不按名字 —— 微信把自带 androidx 也混淆了，RecyclerView$ViewHolder
+实际叫 androidx.recyclerview.widget.k3。
+真机：hits=52，气泡标签正常出现。
 
-【高危 7 条】
-
-- ForwardPlus.hookMenuSelect 挑方法不校验返回类型就 setResult(null)：
-  getDeclaredMethods 顺序不保证，挑中 (MenuItem)->boolean 的重载会拆箱 null → NPE 崩微信。
-- 两处 ViewOutlineProvider.getOutline 没有 try/catch：框架在渲染线程调，
-  首次布局前是 0×0，setRoundRect 抛 IllegalArgumentException 直接漏进微信绘制流程。
-- Beautify.applyCardHeight 的守卫是空 if 块：WRAP_CONTENT 被改写成绝对像素，
-  多行文本从此不会自己长高、被截断。
-- 背景图链路三处全走 content://io.github.lex0m.lexin.bg，而微信 targetSdk 34
-  且没有 QUERY_ALL_PACKAGES（已用 dumpsys 核实 queriesPackages 里没有本模块）
-  ⇒ 面板选图必"保存失败"、背景永远画不出来。
-  修法：写侧先试 provider、失败写微信 files/ 点号文件；读侧本地文件为主路径。
-- 老背景图迁移失败也照 delete()：用户的背景图直接消失。现在只在真搬成功时删。
-- ThemePack.ensureLoaded 的 FileReader 无 try/finally：主题 JSON 坏一次就漏一个 fd，
-  最终 "Too many open files" 崩微信。
-- ThemePack.image() 把同一个 Drawable 实例塞给多个 ImageView：bounds/callback 互抢，
-  图标尺寸跳变、偶发错图、旧界面回收不掉。改成 constantState.newDrawable() 副本。
-
-【中危 7 条】
-- 旧配置迁移按 ap_+hashCode 拼键，而 v1.5.1 写的是 ap_+字节hex → 认不出后又被一律 remove，
-  升级即丢配置。改成先用 prefLogical 反解再迁。
-- Storage.mem 是普通 HashMap，读路径无锁 + 写路径 clear+put ⇒ 并发读到半张空表、配置回默认。
-- EmojiGame 把菜单下标直接当宿主取值，FIST_ORDER 定义了从没用过：猜拳石头/布错位、
-  骰子整体偏移一格。按 v1.3 实现改回。
-- 面板广播 action 解出来是微信自己的 com.tencent.mm.ui.intent.ACTION_MM_UI_HINT，
-  任意外部 App 一条广播就能弹我们的全屏面板。换成私有短串 x.b 并加 MAC。
-- ThemePack.image() 无负缓存：未命中的资源每次都要探 4 个扩展名 × 2 个根目录。
-- barCache 有读无写：「微信重设背景后贴回切片」那条自愈是死代码。
-- Anchors.resolve() 在锁内做 N×M 次 Class.forName（本轮未改，见已知未修）。
-
-【构建可复现】
-上一版 VERSIONS.md 记的 v1.6.1 是 e0ead57f…，实际产物是 435d0a42…。
-不是手误 —— 同一份源码连编三次，三个哈希。根因是 build.sh 每次用 secrets 随机生成
-锚点表密钥 → anchor.bin / AnchorKey / classes.dex / 签名全变。
-现在改成确定性派生：sha256("lexin-anchor:" + 项目私盐 + 源码指纹)，
-盐在 keystore/anchor.salt（不入库、不进包）。源码不变 ⇒ 包一致（已实测连跑两次哈希相同）。
-
-【复审里排除掉的假 bug】
-- adoptLoader 的 cl==loader 早退不是死代码：install 已把 loader 设成 Application 自己的 loader。
-- lastView / markedMenu 静态引用泄漏：这两个字段在当前代码里已经不存在。
-- 朋友圈 sight_* 视频不是加密体，文件头是 ftypisom/mp41 标准 MP4，别去"解密"。
-- 转发分享走 content://，不会 FileUriExposedException。
+【顺手：让「为什么没生效」能被看见】
+Status.note 变更也置脏位；新增 Features.pushSoon()，诊断信息一有变化就立刻推
+（2 秒节流），不等 5 分钟窗口 —— 微信切后台就冻结，那个窗口可能永远等不到。
+现在 status.txt 里能看到：扫了几轮 / 扫了多少节点 / 几个候选 / 为什么没点 /
+最近进过哪些页面 / 面板 kind 是多少。
 
 【产物】
 dist/lexin.apk  686,292 B
-sha256 723107faac53fbafa4f2b11b9b4cf1b633f2da21ccaa0a21b6204560b477dcff
-version 1.6.2(47) · 构建 [7/7] 全绿 · 真机已装
+sha256 ac763bacbe7b96d484320d185761eb2d3a9d8970b15a14fadd2998b20f207d58
+version 1.6.3(48) · 真机已装
 
-【已知未修（下一轮）】
-Anchors 持锁解析、defer 与 adoptLoader 双装、MIUI 上面板开关重启即丢、
-SettingsPanel 的 showing/current 状态机、Beautify 主线程解码、Steps 重入门、
-BgProvider 仍打明文日志、Theme.hookTextScale 只处理 Float 重载。
+【没验的】
+对方撤回的标签方向（selfRecall）没有真实样本，只验了自己撤回。
+上一版列的 8 条已知未修这版没动。

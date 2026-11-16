@@ -72,6 +72,8 @@ final class Probe {
         if (r.first == 0L) r.first = now;
         r.last = now;
         r.hits++;
+        // 命中是"这个功能真的在工作"的唯一证据，尽快推出去
+        Features.pushSoon();
     }
 
     static void note(String feature, String text) {

@@ -281,7 +281,11 @@ final class Features {
                 @Override
                 public void run() {
                     try {
-                        if (mainProcess && Probe.totalHits() != pushedHits) pushStatusToPanel();
+                        // 命中数变了、或者有新的诊断备注 → 推一份新快照。
+                        // 以前只看命中数，「没命中」的原因永远传不出来。
+                        if (mainProcess && (Probe.totalHits() != pushedHits || Status.consumeNoteDirty())) {
+                            pushStatusToPanel();
+                        }
                     } catch (Throwable ignored) {
                         // 推送失败不影响任何功能
                     }
@@ -290,6 +294,39 @@ final class Features {
             }, 180000L);
         } catch (Throwable ignored) {
             // 排不上队就算了
+        }
+    }
+
+    private static volatile boolean pushScheduled = false;
+    private static volatile long lastPush = 0L;
+
+    /**
+     * 把一份新快照尽快推出去（2 秒节流）。
+     *
+     * 为什么需要：定时推送是 3 分钟后首次、之后每 5 分钟一次，而微信一切到后台
+     * 就被系统冻结，Handler 不跑 ⇒ 用户在前台做的操作（点骰子、开图片）产生的诊断备注
+     * 永远等不到下一次窗口。这里让「有新的诊断信息」立刻推，节流 2 秒防止刷屏。
+     */
+    static void pushSoon() {
+        if (pushScheduled) return;
+        long now = System.currentTimeMillis();
+        if (now - lastPush < 2000L) return;
+        pushScheduled = true;
+        try {
+            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    pushScheduled = false;
+                    lastPush = System.currentTimeMillis();
+                    try {
+                        pushStatusToPanel();
+                    } catch (Throwable ignored) {
+                        // 推不出去不影响功能
+                    }
+                }
+            }, 800L);
+        } catch (Throwable ignored) {
+            pushScheduled = false;
         }
     }
 

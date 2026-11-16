@@ -49,8 +49,26 @@ final class Status {
         stamp = System.currentTimeMillis();
     }
 
+    /**
+     * 备注更新时置脏位：定时推送以前只在「命中数变化」时发，导致
+     * 「为什么没命中」这类诊断信息永远传不出微信进程（note 改了也不推）。
+     * 现在 note 一变，下一次定时窗口就会推一份出来。
+     */
+    private static volatile boolean noteDirty = false;
+
     static void note(String feature, String text) {
         Probe.note(feature, text);
+        noteDirty = true;
+        // 有新的诊断信息就尽快推一份出去（节流在 Features 里），
+        // 不等那个 5 分钟的定时窗口 —— 微信一旦切后台就冻结，窗口永远等不到。
+        Features.pushSoon();
+    }
+
+    /** 取并清除脏位（定时推送用）。 */
+    static boolean consumeNoteDirty() {
+        if (!noteDirty) return false;
+        noteDirty = false;
+        return true;
     }
 
     static String note(String feature) {
