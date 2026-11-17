@@ -58,6 +58,14 @@ final class Storage {
     static final String K_DIAG = "diag_log";
     /** v1.3 自动语音转文字（默认关：调微信官方转文字，联网识别）。 */
     static final String K_VOICE_TEXT = "voice_text";
+    /**
+     * v1.7.8 语音导出 MP3 的码率（kbps，默认 48）。
+     *
+     * 值域在 VoiceExport 里夹到 16~192，这里只存用户选择。
+     * 原来的键名是硬编码字符串 "voice_kbps"，散在 ConvertActivity / ForwardPlus 两处
+     * （面板一直没入口）——收成常量，改一处就够。
+     */
+    static final String K_VOICE_KBPS = "voice_kbps";
     /** v1.3 悬浮聊天底栏（默认关：改输入栏外观）。 */
     static final String K_FLOAT_FOOTER = "float_footer";
     /** v1.3 批量分类标签（默认关：走微信官方 netscene 改标签）。 */
@@ -115,7 +123,13 @@ final class Storage {
                 if (hostSide) {
                     // v1.6：宿主侧零落盘、零读宿主文件。先读模块侧镜像（只读），
                     // 读不到就等广播，再没有就用默认值。
-                    loadModulePrefs(ctx);
+                    //
+                    // v1.7.22（免 root 自审）：模块没被独立安装时**不存在模块 prefs**，
+                    // 去反射 XSharedPreferences 只会白等一次（Vector 的实现里有
+                    // XSharedPreferences-Daemon，缺文件时可能走 daemon/IPC），
+                    // 而且它在 Application.attach 期间是同步调的 —— 直接跳过，读微信侧镜像。
+                    if (Compat.moduleInstalled()) loadModulePrefs(ctx);
+                    if (mem.isEmpty()) readHostPrefs();   // 模块镜像读不到（免 root / 广播断）时兜底
                     loaded = true;
                     watch();
                     prefetch();          // 内含：迁移旧键 → 拉最新全量
@@ -514,10 +528,76 @@ final class Storage {
         if (hostSide) {
             // v1.6：宿主侧只在内存里更新，并如实告诉模块侧（不写任何文件）
             putViaProvider(key, encoded);
+            // ★ v1.7.3 兜底（真机实证）：这台设备的 ColourOS Greezer 会把微信发往模块的广播
+            //   全判成 "Greezer Denial" 丢弃，而 provider / bindService 又被包可见性封死
+            //   ⇒ 面板改的开关永远到不了模块侧，重启微信就回到默认值（用户报的"改了没用"）。
+            //   这里退回 v1.3 的成熟做法：**面板本来就是跑在微信进程里**，
+            //   直接把整份配置写进微信自己的 prefs（键名 ap_+hash，混在它几百个键里）。
+            //   代价是微信目录里留下一条痕迹；换来的是「改了真的会生效」。
+            writeHostPrefs();
         } else {
             dirty = true;
             flush();
             notifyHosts();
+        }
+    }
+
+    /** 微信 prefs 里的镜像键名（混淆：ap_ + 包名与后缀的 hash，混在微信自己的键堆里）。 */
+    private static String hostPrefsKey() {
+        try {
+            return "ap_" + Integer.toHexString((MODULE_PKG + "#cfg3").hashCode());
+        } catch (Throwable t) {
+            return "ap_cfg3";
+        }
+    }
+
+    /**
+     * 微信侧：把内存镜像整份写进微信自己的 prefs（v1.7.3 兜底）。
+     *
+     * 为什么可以接受"留痕迹"：跨进程三条路全断时，功能可用 > 绝对隐蔽。
+     * 写的是混淆后的整串（不是明文 k=v），键名也做了 hash，扫字符串看不出含义。
+     */
+    private static void writeHostPrefs() {
+        try {
+            Context c = appCtx;
+            if (c == null) return;
+            StringBuilder sb = new StringBuilder(mem.size() * 24 + 32);
+            synchronized (Storage.class) {
+                for (Map.Entry<String, String> e : mem.entrySet()) {
+                    sb.append(e.getKey()).append('=').append(e.getValue()).append('\n');
+                }
+            }
+            byte[] plain = sb.toString().getBytes("UTF-8");
+            byte[] enc = xor(plain, plain.length);
+            String b64 = android.util.Base64.encodeToString(enc, android.util.Base64.NO_WRAP);
+            c.getSharedPreferences("com.tencent.mm_preferences", Context.MODE_PRIVATE)
+                    .edit().putString(hostPrefsKey(), b64).apply();
+        } catch (Throwable t) {
+            log("host prefs write failed: " + t.getClass().getSimpleName());
+        }
+    }
+
+    /** 微信侧：从自己的 prefs 里把镜像读回来（模块镜像读不到时的最后一道）。 */
+    private static boolean readHostPrefs() {
+        try {
+            Context c = appCtx;
+            if (c == null) return false;
+            String b64 = c.getSharedPreferences("com.tencent.mm_preferences", Context.MODE_PRIVATE)
+                    .getString(hostPrefsKey(), null);
+            if (b64 == null || b64.isEmpty()) return false;
+            byte[] enc = android.util.Base64.decode(b64, android.util.Base64.NO_WRAP);
+            String text = new String(xor(enc, enc.length), "UTF-8");
+            int n = 0;
+            for (String line : text.split("\n")) {
+                int eq = line.indexOf('=');
+                if (eq <= 0) continue;
+                mem.put(line.substring(0, eq), line.substring(eq + 1));
+                n++;
+            }
+            log("host prefs loaded " + n);
+            return n > 0;
+        } catch (Throwable t) {
+            return false;
         }
     }
 
@@ -634,6 +714,34 @@ final class Storage {
     private static String asStr(String s, String def) {
         if (s == null || s.length() < 3 || s.charAt(0) != 's') return def;
         return unescape(s.substring(2));
+    }
+
+    /**
+     * 诊断导出用：整份配置，**解码成人话**（true / 200 / 文本）。
+     *
+     * 以前排查最费时间的不是复现，是「用户到底开了什么」——面板十几种开关 + 二十几个内部键，
+     * 靠问用户点没点等于重新走一遍。这里一次性全给，敏感键由 {@code Diagnosis} 打码。
+     */
+    static Map<String, String> dumpDecoded() {
+        Map<String, String> sorted = new java.util.TreeMap<>();
+        try {
+            ensureLoaded();
+            synchronized (Storage.class) {
+                for (Map.Entry<String, String> e : mem.entrySet()) {
+                    String raw = e.getValue();
+                    String v;
+                    if (raw == null) v = "";
+                    else if (raw.startsWith("b:")) v = asBool(raw, false) ? "true" : "false";
+                    else if (raw.startsWith("i:")) v = String.valueOf(asInt(raw, 0));
+                    else if (raw.startsWith("s:")) v = asStr(raw, "");
+                    else v = raw;
+                    sorted.put(e.getKey(), v);
+                }
+            }
+        } catch (Throwable ignored) {
+            // 读不到就交空表，导出别因为这一项失败
+        }
+        return sorted;
     }
 
     private static String escape(String s) {

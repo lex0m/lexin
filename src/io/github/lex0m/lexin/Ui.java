@@ -55,6 +55,12 @@ final class Ui {
     static final int ACCENT_DEEP = 0xFF7C5CFC;
     static final int OK = 0xFF0F9D58;
     static final int WARN = 0xFFE5484D;
+    /**
+     * 「已就位 · 等触发」专用色（v1.7）。
+     * 原来这一档也走 WARN 红：真机面板 18 项里 16 项标红，用户第一眼就是"全坏了"，
+     * 而其中 14 项只是还没碰到触发操作（hook 活性 hits=57 证明机制正常）。
+     */
+    static final int READY = 0xFF3B82F6;
     static final int GOLD = 0xFFF59E0B;
 
     /** 四个分组各一个强调色，视觉上分得开。 */
@@ -284,9 +290,27 @@ final class Ui {
     }
 
     /** 白色圆角卡片。 */
+    /**
+     * 面板底色：柔和的竖向渐变（v1.7）。
+     *
+     * 为什么不用纯色：卡片换成半透明玻璃后，底下若是纯色，玻璃的高光/描边几乎看不出来。
+     * 渐变让"玻璃浮在液体上"这件事成立，而且不需要任何位图/模糊，零额外开销。
+     */
+    static android.graphics.drawable.Drawable pageBg(Context ctx) {
+        android.graphics.drawable.GradientDrawable g = new android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{0xFFF7F8FB, 0xFFEFF2F7, 0xFFE9EDF4});
+        g.setCornerRadius(0f);
+        return g;
+    }
+
     static LinearLayout card(Context ctx) {
         LinearLayout c = column(ctx);
-        c.setBackground(round(ctx, CARD, 14));
+        // v1.7：液态玻璃（L0 伪玻璃档，全系统安全）。
+        // 以前是 round(ctx, CARD, 14) 一块纯色圆角 —— 平板、没有厚度也没有边缘光。
+        // 现在：半透明体色 + 顶部高光 + 底内阴影 + 1px 镜面描边，四层叠出来的"玻璃"。
+        // 性能：shader 只在尺寸变化时重建（每帧重建是频闪的经典成因），每帧只有 3~4 个 drawRect。
+        c.setBackground(Glass.of(Glass.BASE_LIGHT, 14f, 236, dp(ctx, 1)));
         if (Build.VERSION.SDK_INT >= 21) {
             try {
                 c.setElevation(dp(ctx, 1));
@@ -472,15 +496,21 @@ final class Ui {
         return (a << 24) | (argb & 0x00FFFFFF);
     }
 
-    /** 状态圆点 + 文字，用于适配状态。 */
-    static TextView statusLine(Context ctx, boolean ok, String name, String detail) {
+    /** 状态圆点 + 文字，用于适配状态（三态：命中绿 / 已就位蓝 / 未适配红）。 */
+    static TextView statusLine(Context ctx, int color, String name, String detail) {
         TextView tv = new TextView(ctx);
-        tv.setText((ok ? "\u25CF " : "\u25CB ") + name + "  " + detail);
+        boolean filled = color == OK || color == READY;
+        tv.setText((filled ? "\u25CF " : "\u25CB ") + name + "  " + detail);
         tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f);
-        tv.setTextColor(ok ? OK : WARN);
+        tv.setTextColor(color);
         tv.setLineSpacing(dp(ctx, 2), 1f);
         tv.setPadding(dp(ctx, 14), dp(ctx, 3), dp(ctx, 14), dp(ctx, 3));
         return tv;
+    }
+
+    /** 旧签名（true=命中绿 / false=未适配红），保留给还没改成三色的调用点。 */
+    static TextView statusLine(Context ctx, boolean ok, String name, String detail) {
+        return statusLine(ctx, ok ? OK : WARN, name, detail);
     }
 
     interface Toggle {

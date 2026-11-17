@@ -1,13 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="io.github.lex0m.lexin"
-    android:versionCode="48"
-    android:versionName="1.6.3">
+    android:versionCode="71"
+    android:versionName="1.7.22">
 
     <uses-sdk android:minSdkVersion="28" android:targetSdkVersion="35" />
 
     <!-- 「每日一言」要联网取一句话；只有这一条权限，模块不在后台跑任何网络任务 -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Android 9（minSdk 28）上把语音 MP3 写进公共 Download/乐信/语音 需要它；
+         10+ 一律走 MediaStore，不需要任何存储权限（maxSdkVersion 保证高版本不申请） -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+    <!-- 转码完成后发通知（33+ 需要用户授予，拒绝也不影响文件落盘） -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 语音导出的「信箱」在公共 Downloads 下，而文件是微信写的：
+         Android 11+ 的 scoped storage 规定应用只能查到自己创建的文件，
+         所以必须拿「所有文件访问」才能看到微信放进来的待转换文件。 -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <!-- 常驻监听：微信把待转换语音写进工作目录后，不依赖用户手动打开 App 就能转码 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- 保活：请用户把乐信加入电池优化白名单（面板里有入口） -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!-- Android 11+ 包可见性：跳板要用显式组件拉起微信的 LauncherUI，面板里也要能打开自己的设置页 -->
     <queries>
@@ -16,6 +32,7 @@
     </queries>
 
     <application
+        android:name=".LexinApp"
         android:extractNativeLibs="true"
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
@@ -54,6 +71,29 @@
             android:label="@string/app_name"
             android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar" />
 
+        <!-- v1.7.11 无界面诊断导出：adb shell am start -n io.github.lex0m.lexin/.DiagActivity
+             只给 root / shell 用（exported=false），普通 App 拉不动 -->
+        <activity
+            android:name=".DiagActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:excludeFromRecents="true"
+            android:noHistory="true" />
+
+        <!-- v1.7.3 常驻监听 + 开机自启 -->
+        <service
+            android:name=".WorkService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
         <!-- Serves the chosen background to the hook side. The image lives in the
              module's private dir (invisible to WeChat); this provider is the only
              way the host process can read it without us writing into WeChat's own
@@ -67,6 +107,7 @@
                 <action android:name="x.q" />
                 <action android:name="x.p" />
                 <action android:name="x.s" />
+                <action android:name="x.c" />
             </intent-filter>
         </receiver>
 

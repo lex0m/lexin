@@ -77,6 +77,12 @@ M=${WXMOD_DIR:-$W/../wxmod}
 R8=$M/tools/r8.jar
 ANDROID_JAR=$M/libs/android-35.jar
 XPOSED_JAR=$M/libs/api-82-aliyun.jar
+# v1.7.6：DexKit（按字符串在运行时 dex 里精确找类，解决"静态扫不到锚点"）
+# 依赖：classes.jar + flatbuffers（DexKit 结果序列化）+ kotlin-stdlib（DexKit 是 Kotlin 写的）
+DEXKIT_CP=""
+for j in "$W/libs/dexkit.jar" "$W/libs/flatbuffers.jar" "$W/libs/kotlin-stdlib-1.9.24.jar"; do
+    if [ -f "$j" ]; then DEXKIT_CP="$DEXKIT_CP:$j"; else echo "WARN: 缺少 $j（DexKit 功能将不可用）" >&2; fi
+done
 
 for f in "$JAVA" "$JAVAC" "$AAPT2" "$APKSIGNER_JAR" "$R8" "$ANDROID_JAR" "$XPOSED_JAR"; do
     [ -e "$f" ] || { printf '缺文件: %s\n' "$f" >&2; exit 3; }
@@ -126,6 +132,10 @@ bid,_ = source_digest(sys.argv[2])
 print(hashlib.sha256(("lexin-anchor:"+salt+":"+bid).encode()).hexdigest()[:32])
 ' "$W/tools" "$W" "$SALT")
 "$PY" "$W/tools/gen-anchorkey.py" "$B/gen-src/io/github/lex0m/lexin/AnchorKey.java" "$AK"
+# v1.7：同一份密文再内嵌进 dex（C-01）—— 免 root 内嵌模式下宿主 APK 里没有 assets/anchor.bin，
+# 且拿不到模块 APK 路径，只有代码里这一份能救回来。两边必须用同一个 AK，否则解密结果对不上。
+"$PY" "$W/tools/gen-anchordata.py" "$W/assets/anchors.json" \
+    "$B/gen-src/io/github/lex0m/lexin/AnchorData.java" "$AK"
 export LEXIN_ASSET_KEY="$AK"
 
 echo "[1/7] aapt2 compile resources"
@@ -144,7 +154,7 @@ find "$W/src" -name '*.java' | sort > "$B/sources.txt"
 find "$B/gen-src" -name '*.java' 2>/dev/null | sort >> "$B/sources.txt"
 find "$B/gen" -name '*.java' 2>/dev/null | sort >> "$B/sources.txt"
 "$JAVAC" -nowarn -source 11 -target 11 -encoding UTF-8 \
-    -cp "$ANDROID_JAR:$XPOSED_JAR" \
+    -cp "$ANDROID_JAR:$XPOSED_JAR$DEXKIT_CP" \
     -d "$B/classes" @"$B/sources.txt"
 
 echo "[4/7] R8 (dex + shrink)"
@@ -155,7 +165,9 @@ find "$B/classes" -name '*.class' | sort > "$B/classes.txt"
     --lib "$XPOSED_JAR" \
     --pg-conf "$W/proguard-rules.pro" \
     --pg-map-output "$B/mapping.txt" \
-    --output "$B/dex" @"$B/classes.txt"
+    --output "$B/dex" \
+    "$W/libs/dexkit.jar" "$W/libs/flatbuffers.jar" "$W/libs/kotlin-stdlib-1.9.24.jar" "$W/libs/annotations.jar" \
+    @"$B/classes.txt"
 [ -s "$B/dex/classes.dex" ] || { echo "R8 没有产出 classes.dex" >&2; exit 5; }
 cp -f "$B/mapping.txt" "$W/mapping.txt"      # 崩溃栈反混淆用
 cp -f "$B/mapping.txt" "$OUT/mapping-$VER-$CODE.txt"

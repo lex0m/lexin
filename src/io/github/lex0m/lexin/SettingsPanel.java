@@ -75,23 +75,34 @@ final class SettingsPanel {
             // 忽略
         }
         showing = false;
+        Beautify.setPanelOpen(false);
     }
 
     private static void build(final Activity host) {
         showing = true;
+        // v1.7.10：面板开着的时候，卡片图一律不铺（面板里的对话框行也是 RecyclerView，
+        // 85% 屏宽，图打底会让「裁剪区域」这类选项看不清）。关掉面板立刻恢复。
+        Beautify.setPanelOpen(true);
 
         final Dialog d = new Dialog(host,
                 android.R.style.Theme_DeviceDefault_Light_NoActionBar);
+        d.setOnDismissListener(new DialogInterface.OnDismissListener() {
+            @Override
+            public void onDismiss(DialogInterface dialog) {
+                showing = false;
+                Beautify.setPanelOpen(false);
+            }
+        });
         d.requestWindowFeature(Window.FEATURE_NO_TITLE);
         Window w = d.getWindow();
         if (w != null) {
             w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
-            w.setBackgroundDrawable(new ColorDrawable(Ui.BG));
+            w.setBackgroundDrawable(Ui.pageBg(host));
             Ui.noForceDark(w);          // 深色模式下别把浅色面板强制反转
         }
 
         ScrollView scroll = new ScrollView(host);
-        scroll.setBackgroundColor(Ui.BG);
+        scroll.setBackground(Ui.pageBg(host));
         scroll.setFillViewport(true);
 
         LinearLayout root = Ui.page(host);
@@ -164,27 +175,51 @@ final class SettingsPanel {
         Ui.infoRow(host, group, "点一下可以复制群号；有问题或建议欢迎进群反馈。", Ui.SUB);
         root.addView(group);
 
-        // ── 适配状态 ──
+        // ── 适配状态（v1.7 三态） ──
         LinearLayout st = Ui.card(host);
         Ui.section(host, st, "当前微信适配状态", Ui.OK);
+        // v1.7.8：微信版本 vs 锚点表覆盖。装了新版微信后，用户只会看到一堆红项，
+        // 然后以为"模块坏了"——这里先把真正的原因说在前面。
+        // v1.7.9：升级成「兼容性结论」——版本不在表里只是其中一条依据，
+        // 主判据改成"未适配功能占比"（借 wcx VersionCompat 的分档思路，不按版本号一刀切）。
+        String compTip = compatNote(host);
+        if (compTip != null) Ui.infoRow(host, st, compTip, Ui.WARN);
         // v1.6：微信内面板能看到真实命中数（同一进程），不再只报"已生效"
+        // v1.7：把「已就位但还没触发」从"未命中（红）"里拆出来单独着色。
+        //       真机 2026-11-16：18 项里 16 项红，其实 14 项只是没碰到触发操作，
+        //       用户看到的是"整个模块坏了"。现在：绿=真命中、蓝=等触发、红=未适配。
+        int nHit = 0, nReady = 0, nNone = 0;
+        for (Probe.Row r : Probe.all().values()) {
+            if (r.state() == Status.HIT) nHit++;
+            else if (r.state() == Status.ARMED) nReady++;
+            else nNone++;
+        }
+        Ui.infoRow(host, st, "已命中 " + nHit + " 项 · 等触发 " + nReady + " 项 · 未适配 " + nNone + " 项"
+                + (nReady > 0 ? "（蓝色项正常，照提示做一次操作就会变绿）" : ""), Ui.SUB);
+
         for (Map.Entry<String, Probe.Row> e : Probe.all().entrySet()) {
             Probe.Row r = e.getValue();
-            boolean good = r.state() == Status.HIT;
+            int color;
             String detail;
             if (r.state() == Status.HIT) {
+                color = Ui.OK;
                 detail = "已命中 " + r.hits + " 次";
                 if (r.last > 0) {
                     long m = (System.currentTimeMillis() - r.last) / 60000L;
                     detail += m <= 0 ? "（刚刚）" : "（" + m + " 分钟前）";
                 }
             } else if (r.state() == Status.ARMED) {
-                detail = "已挂载 " + r.armed + " 处，未命中";
+                color = Ui.READY;
+                // 说清楚"还差什么"：没这句，蓝色和红色在用户眼里没区别
+                String how = Triggers.of(e.getKey());
+                detail = "已就位（" + r.armed + " 处 hook）"
+                        + (how == null ? " · 等操作触发" : " · " + how);
             } else {
-                detail = "未适配（该功能自动跳过）";
+                color = Ui.WARN;
+                detail = "未适配（当前微信版本自动跳过）";
             }
             if (r.note != null && !r.note.isEmpty()) detail += " · " + r.note;
-            st.addView(Ui.statusLine(host, good, e.getKey(), detail));
+            st.addView(Ui.statusLine(host, color, e.getKey(), detail));
         }
         // actionRow 内部已经把这一行加进卡片了，这里不要再 addView 一次
         Ui.actionRow(host, st, "独立设置页",
@@ -212,8 +247,26 @@ final class SettingsPanel {
                     }
                 });
         // 现场排查用：资源走哪条路 + 锚点表版本 + 诊断日志开关（日志默认关，发布版一个字不写）
+        // v1.7：乐信工作目录（语音 MP3 / 背景图 / 诊断都收在这一个根目录下）
+        // 面板跑在微信进程，读不到模块私有目录的 index.tsv，所以这里只给路径 + 一键复制；
+        // 真实文件列表在独立设置页（那边是模块自己的进程）。
+        Ui.actionRow(host, st, "乐信工作目录",
+                "Download/乐信/　语音 · 背景 · 诊断（点一下复制路径）", Ui.OK, new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            android.content.ClipboardManager cm = (android.content.ClipboardManager)
+                                    host.getSystemService(android.content.Context.CLIPBOARD_SERVICE);
+                            cm.setPrimaryClip(android.content.ClipData.newPlainText(
+                                    "lexin", "Download/乐信/"));
+                            toast(host, "路径已复制：Download/乐信/");
+                        } catch (Throwable t) {
+                            toast(host, "复制失败：" + t.getClass().getSimpleName());
+                        }
+                    }
+                });
         Ui.actionRow(host, st, "诊断信息",
-                diagLabel() + "（点一下切换诊断日志）", Ui.OK, new Runnable() {
+                diagLabel(host) + "（点一下切换诊断日志）", Ui.OK, new Runnable() {
                     @Override
                     public void run() {
                         boolean on = !Log.runtimeOn();
@@ -224,6 +277,41 @@ final class SettingsPanel {
                                 : "诊断日志已关闭");
                         close();
                         show(host);
+                    }
+                });
+        // v1.7.11：一键诊断导出。面板跑在微信进程，Status/日志环都在这一侧，导出的现场最全。
+        Ui.actionRow(host, st, "一键诊断导出",
+                "环境 · 配置 · 锚点 · 功能状态 · 最近日志 → Download/乐信/诊断/", Ui.OK,
+                new Runnable() {
+                    @Override
+                    public void run() {
+                        toast(host, "正在打包诊断信息…");
+                        new Thread(new Runnable() {
+                            @Override
+                            public void run() {
+                                final String where = Diagnosis.export(host);
+                                new android.os.Handler(android.os.Looper.getMainLooper()).post(new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        try {
+                                            if (where == null) {
+                                                toast(host, "导出失败（诊断日志里会有原因）");
+                                            } else {
+                                                android.content.ClipboardManager cm =
+                                                        (android.content.ClipboardManager)
+                                                                host.getSystemService(
+                                                                        android.content.Context.CLIPBOARD_SERVICE);
+                                                cm.setPrimaryClip(android.content.ClipData
+                                                        .newPlainText("lexin", where));
+                                                toast(host, "已导出：" + where + "（路径已复制）");
+                                            }
+                                        } catch (Throwable ignored) {
+                                            // 复制失败不影响导出
+                                        }
+                                    }
+                                });
+                            }
+                        }, "lexin-diag").start();
                     }
                 });
         root.addView(st);
@@ -249,6 +337,9 @@ final class SettingsPanel {
 
         LinearLayout g3 = Ui.card(host);
         Ui.section(host, g3, "表情玩法", Ui.C_PLAY);
+        // v1.7：拍一拍防误触（只拦自己双击头像拍出去，别人拍我照常）
+        addSwitch(host, g3, Prefs.K_PAT_BLOCK, "拍一拍防误触",
+                "默认开。双击头像不再拍出去，别人拍你照常显示（关掉要重启微信）", Ui.C_PLAY);
         addSwitch(host, g3, Prefs.K_DICE, "骰子点数自选",
                 "长按表情面板的骰子可指定点数（或保持随机）", Ui.C_PLAY);
         addSwitch(host, g3, Prefs.K_FIST, "猜拳结果自选",
@@ -347,6 +438,25 @@ final class SettingsPanel {
         Ui.section(host, g8, "语音 · 底栏 · 标签", Ui.C_CHAT);
         addSwitch(host, g8, Prefs.K_VOICE_TEXT, "自动语音转文字",
                 "收到语音自动调微信官方转文字（不接第三方识别）", Ui.C_CHAT);
+        // v1.7.8：导出码率可选。参数链早就贯通（ConvertActivity 与 ForwardPlus→CfgBus 两条入口
+        // 读同一个 voice_kbps 键），唯一缺口是面板没入口 ⇒ 实际永远跑默认 48kbps。
+        addAction(host, g8, "语音导出码率",
+                VOICE_KBPS_VALUES[indexOf(Storage.num(Prefs.K_VOICE_KBPS, 48), VOICE_KBPS_VALUES)] + " kbps",
+                Ui.C_CHAT, new Runnable() {
+                    @Override
+                    public void run() {
+                        choose(host, "语音导出码率", VOICE_KBPS_LABELS,
+                                indexOf(Storage.num(Prefs.K_VOICE_KBPS, 48), VOICE_KBPS_VALUES), new Pick() {
+                                    @Override
+                                    public void on(int i) {
+                                        Storage.setNum(Prefs.K_VOICE_KBPS, VOICE_KBPS_VALUES[i]);
+                                        toast(host, "已设为 " + VOICE_KBPS_VALUES[i] + " kbps（下次导出生效）");
+                                        close();
+                                        show(host);
+                                    }
+                                });
+                    }
+                });
         addSwitch(host, g8, Prefs.K_FLOAT_FOOTER, "悬浮聊天底栏",
                 "聊天输入栏改成悬浮卡片（圆角 + 阴影 + 侧边距）", Ui.C_CHAT);
         addSwitch(host, g8, Prefs.K_HOME_FLOAT_TAB, "主页悬浮底栏",
@@ -367,6 +477,26 @@ final class SettingsPanel {
         LinearLayout g4 = Ui.card(host);
         Ui.section(host, g4, "界面美化", Ui.C_SKIN);
         addSwitch(host, g4, Prefs.K_THEME, "启用界面美化", "总开关", Ui.C_SKIN);
+        // v1.7.13 全息透明：不动任何位图，只把微信窗口调成半透明，桌面实时透出来
+        addAction(host, g4, "全息透明", holoLabel(), Ui.C_SKIN, new Runnable() {
+            @Override
+            public void run() {
+                int cur = Holo.on() ? Holo.percent() : 0;
+                choose(host, "全息透明（整窗不透明度）", HOLO_LABELS,
+                        indexOf(cur, HOLO_VALUES), new Pick() {
+                            @Override
+                            public void on(int i) {
+                                int v = HOLO_VALUES[i];
+                                Storage.setOn(Holo.K_HOLO, v > 0);
+                                if (v > 0) Storage.setNum(Holo.K_HOLO_ALPHA, v);
+                                toast(host, v > 0
+                                        ? "全息透明 " + v + "%（切一下界面/重进生效）"
+                                        : "全息透明已关闭");
+                                dismissAndReopen(host);
+                            }
+                        });
+            }
+        });
         addAction(host, g4, "全屏背景", bgLabel(), Ui.C_SKIN, new Runnable() {
             @Override
             public void run() {
@@ -477,6 +607,11 @@ final class SettingsPanel {
         // ── 聊天条卡片化 ──
         LinearLayout g5 = Ui.card(host);
         Ui.section(host, g5, "聊天条卡片化", Ui.C_SKIN);
+        // v1.7：把「面板上有、代码里没读」的开关标出来。
+        // 审查抓到 6 个假开关：玻璃背景（已接线）、背景图、模糊、模糊强度、裁剪 4 键。
+        // 留一个点了没反应的开关，比直接少一个开关更伤信任。
+        Ui.infoRow(host, g5, "背景图 / 裁剪 / 模糊 v1.7.10 已接上（每行一张图，会随列表滚动——卡片本来就该跟内容走）。"
+                + "模糊需要 API 31+，Android 12 以下保持原图。", Ui.SUB);
         addSwitch(host, g5, Beautify.K_CARD_ON, "聊天条卡片化", "缩进留边、圆角、独立背景", Ui.C_SKIN);
         addSwitch(host, g5, Beautify.K_CARD_GLASS, "聊天条玻璃背景",
                 "全透明磨砂玻璃（透过聊天条看到背景，文字清晰）", Ui.C_SKIN);
@@ -576,15 +711,15 @@ final class SettingsPanel {
                                 });
                     }
                 });
-        addSwitch(host, g5, Beautify.K_CARD_BLUR_ON, "聊天条模糊", "与背景模糊各自独立", Ui.C_SKIN);
+        addSwitch(host, g5, Beautify.K_CARD_BLUR_ON, "聊天条模糊", "API 31+ 真模糊；换图/改强度后重进列表即生效", Ui.C_SKIN);
         addAction(host, g5, "聊天条模糊强度",
-                "半径 " + Storage.num(Beautify.K_CARD_BLUR_R, 12), Ui.C_SKIN, new Runnable() {
+                "半径 " + Storage.num(Beautify.K_CARD_BLUR_R, 20), Ui.C_SKIN, new Runnable() {
                     @Override
                     public void run() {
                         final String[] labels = new String[BLURS.length];
                         for (int i = 0; i < BLURS.length; i++) labels[i] = String.valueOf(BLURS[i]);
                         choose(host, "聊天条模糊强度", labels,
-                                indexOf(Storage.num(Beautify.K_CARD_BLUR_R, 12), BLURS), new Pick() {
+                                indexOf(Storage.num(Beautify.K_CARD_BLUR_R, 20), BLURS), new Pick() {
                                     @Override
                                     public void on(int i) {
                                         Storage.setNum(Beautify.K_CARD_BLUR_R, BLURS[i]);
@@ -640,16 +775,40 @@ final class SettingsPanel {
 
     // ── 参数表 ──────────────────────────────────────────────────────────────
 
-    private static final int[] ALPHAS = {255, 220, 180, 128, 90, 50};
-    private static final String[] ALPHA_LABELS = {"100%", "86%", "70%", "50%", "35%", "20%"};
+    /**
+     * 语音导出码率档位（v1.7.8）。
+     *
+     * 只给三档，是刻意的：微信语音源头是 SILK 窄带（8~16kbps 量级），
+     * 转 96/128 只会把文件撑大，音质不会变好 —— 「薄的东西装进大盒子」。
+     */
+    private static final int[] VOICE_KBPS_VALUES = {32, 48, 64};
+    private static final String[] VOICE_KBPS_LABELS = {
+            "32 kbps（文件更小）", "48 kbps（默认，推荐）", "64 kbps（兼容老播放器）"};
+
+    private static final int[] ALPHAS = {255, 220, 180, 128, 90, 50};    private static final String[] ALPHA_LABELS = {"100%", "86%", "70%", "50%", "35%", "20%"};
     private static final int[] RADII = {2, 4, 8, 12, 16, 24, 32};
     private static final String[] RADIUS_LABELS =
             {"2dp", "4dp", "8dp", "12dp", "16dp", "24dp", "32dp"};
     private static final int[] BLURS = {5, 10, 20, 30, 45, 60};
-    /** 资源路径 + 锚点表版本数 —— 现场排查第一眼要看的东西。 */
-    private static String diagLabel() {
+    /** 环境快照 + 资源路径 + 锚点表版本数 —— 现场排查第一眼要看的东西。 */
+    private static String diagLabel(Context ctx) {
         StringBuilder sb = new StringBuilder();
-        sb.append("资源 ").append(Assets.source());
+        // v1.7.9：先报环境（系统版本 / ROM / 框架形态），换设备出问题时这一行就能排除一半可能
+        sb.append(Compat.snapshot(ctx));
+        sb.append(" · 资源 ").append(Assets.source());
+        // 免 root 框架（LSPatch/NPatch 内嵌）下，模块 assets 有可能没被合并进来：
+        // 主题图会哑，但锚点表有 dex 内嵌兜底，功能不受影响 —— 这里如实写出来，别让人以为整个模块坏了。
+        // v1.7.22：现在会真的去四条来源里找（宿主 assets / DexPathList / 私有快照 / PM），
+        //          找不到时把探测过程也带上，省得现场只能猜"到底是框架没合并还是路径不对"。
+        if (!Assets.themeAvailable()) {
+            String miss = Assets.lastMiss();
+            sb.append(" · 主题素材不可用（")
+                    .append(Compat.isRootless() ? "宿主 assets 里没有可读的模块包" : "当前框架读不到模块 APK");
+            if (miss != null && !miss.isEmpty()) sb.append("，探测记录 ").append(miss);
+            sb.append("；锚点表走 dex 内嵌兜底）");
+        }
+        String rl = Compat.rootlessLimits();
+        if (rl != null) sb.append(" · ").append(rl);
         java.util.Set<String> vs = Anchors.knownVersions();
         sb.append(" · 锚点表 ");
         if (vs == null || vs.isEmpty()) {
@@ -662,6 +821,73 @@ final class SettingsPanel {
         }
         sb.append(" · 日志 ").append(Log.runtimeOn() ? "开（重启微信后生效）" : "关");
         return sb.toString();
+    }
+
+    /**
+     * 兼容性结论（v1.7.9）。
+     *
+     * 三条判据，从强到弱：
+     *   ① 微信版本是否在锚点表覆盖范围（结构性风险，先说）
+     *   ② **未适配功能占比**（真实结果；排除"默认关所以没挂"的项，否则误伤一批正常功能）
+     *   ③ 系统版本是否在已验证区间（只在区间外提一句，不打扰正常用户）
+     *
+     * 分档参考 wcx `VersionCompat.checkCompatibility`：0 项 → 不打扰；<20% 基本兼容；
+     * <50% 部分未适配；≥50% 兼容性差。区别是不拿版本号当唯一依据 ——
+     * 版本号决定"理论上该有的类在不在"，失败率决定"实际上挂上了几个"。
+     */
+    private static String compatNote(Context ctx) {
+        try {
+            int total = 0, bad = 0;
+            for (Map.Entry<String, Probe.Row> e : Probe.all().entrySet()) {
+                String note = e.getValue().note;
+                // "默认关所以没挂"不是未适配。这条以前在面板上被染成红色，把用户吓过一次。
+                if (note != null && note.contains("未开启")) continue;
+                total++;
+                if (e.getValue().state() == Status.NONE) bad++;
+            }
+
+            StringBuilder sb = new StringBuilder();
+
+            // ① 版本覆盖
+            java.util.Set<String> vs = Anchors.knownVersions();
+            String cur = HostInfo.versionName(ctx);
+            if (vs != null && !vs.isEmpty() && cur != null && cur.length() > 0 && !vs.contains(cur)) {
+                java.util.List<String> l = new java.util.ArrayList<>(vs);
+                java.util.Collections.sort(l);
+                sb.append("微信 ").append(cur).append(" 不在锚点表覆盖范围（")
+                        .append(l.get(0)).append(" ~ ").append(l.get(l.size() - 1)).append("）");
+            }
+
+            // ② 未适配占比
+            String verdict = null;
+            if (total > 0) {
+                double rate = (double) bad / (double) total;
+                if (bad == 0) {
+                    verdict = null;                                  // 全绿就别打扰
+                } else if (rate < 0.2) {
+                    verdict = "基本兼容（" + bad + "/" + total + " 项未适配）";
+                } else if (rate < 0.5) {
+                    verdict = "部分功能未适配（" + bad + "/" + total + "）· 等模块更新";
+                } else {
+                    verdict = "兼容性较差（" + bad + "/" + total + " 项未适配）· 先点下面的「重新自动适配」";
+                }
+            }
+            if (verdict != null) {
+                if (sb.length() > 0) sb.append(" · ");
+                sb.append(verdict);
+            }
+
+            // ③ 系统版本区间
+            if (!Compat.sdkVerified()) {
+                if (sb.length() > 0) sb.append(" · ");
+                sb.append(Compat.sdkName()).append(" 未在已验证区间（")
+                        .append(Compat.SDK_MIN).append('~').append(Compat.SDK_TESTED).append("）内");
+            }
+
+            return sb.length() == 0 ? null : sb.toString();
+        } catch (Throwable t) {
+            return null;
+        }
     }
 
     private static final int[] STEP_MODES = {2, 1, 3};
@@ -971,6 +1197,16 @@ final class SettingsPanel {
         } catch (Throwable ignored) {
             // 忽略
         }
+    }
+
+    /** 全息透明的强度档位（0=关闭）。100% 只清底、文字最实；越低整窗越透。 */
+    private static final String[] HOLO_LABELS = {
+            "关闭", "100%（只清底 · 字最实）", "92%（默认）", "85%", "78%", "70%", "60%（最透）"};
+    private static final int[] HOLO_VALUES = {0, 100, 92, 85, 78, 70, 60};
+
+    private static String holoLabel() {
+        if (!Holo.on()) return "关闭（微信界面透出桌面壁纸）";
+        return Holo.percent() + "% · 已开";
     }
 
     private static String bgLabel() {

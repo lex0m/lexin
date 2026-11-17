@@ -1004,7 +1004,7 @@ final class ForwardPlus {
 
     /**
      * ★ 受限消息提取：微信不提供转发时，用**微信进程自己的权限**把源文件拷到
-     *   Download/乐信导出/ —— 语音（type 34）的 field_imgPath 就是 voice2 下的 .amr 文件名。
+     *   Download/乐信/导出/ —— 语音（type 34）的 field_imgPath 就是 voice2 下的 .amr 文件名。
      * （下一步：把提取出的文件交给官方发送接口发出去）
      */
     private static void extractRestricted() {
@@ -1019,6 +1019,20 @@ final class ForwardPlus {
             if (type == 34) {
                 // ★★ 无痕提取（不播放）：消息 → VoiceInfo → 微信自己的 getAmrFullPath → AMR 路径
                 String amr = voicePathSilently(msg, lastTalker);
+                if (amr == null) {
+                    // 8.0.80 上 mc0.b 已经只剩构造函数 ⇒ 走文件系统索引
+                    java.io.File vf = resolveVoice(msg);
+                    if (vf != null) {
+                        boolean ok = launchConvert(vf, name);
+                        toast(ok ? "正在导出语音…" : ("没能启动转码（"
+                                + (Compat.isRootless() ? "免 root 框架无独立模块进程" : "组件缺失") + "）"));
+                        return;
+                    }
+                }
+                // ★★ v1.7：**先走新链路** —— 字节直传模块进程转 MP3，全程零界面。
+                //    旧链路（微信解码成 AMR 落盘 / 拉 ConvertActivity）只在它失败时兜底：
+                //    那些中间文件既污染公共目录，ConvertActivity 还会把微信切到后台。
+                if (amr != null && exportByBus(amr, name)) return;
                 if (amr != null) {
                     java.io.File srcF = new java.io.File(amr);
                     Log.d(T + "silent voice path=" + amr + " size=" + srcF.length());
@@ -1233,8 +1247,148 @@ final class ForwardPlus {
      * **读不到 /sdcard/Download 下的文件** ✗ ⇒ 小文件直接塞 byte[]（Binder 上限约 1MB）。
      * 512KB 以上（极少见）才退回路径，并在 App 侧走权限兜底。
      */
+    /**
+     * 兜底：把 SILK 直接写进「乐信工作目录/待转换/」（v1.7.2）。
+     *
+     * 为什么这条能成而其它都不行：
+     *   · 广播 —— 被 ColorOS 的 Greezer 判 Denial 丢弃；
+     *   · provider / bindService / startActivity —— 微信看不见模块包（包可见性）；
+     *   · **MediaStore 写 Downloads 不需要任何权限**，而且是在微信自己的进程里完成，
+     *     不涉及任何跨进程调用 —— 这是唯一一条不受上述限制影响的路。
+     *
+     * 写完乐信 App 侧用 ContentObserver 监听该目录，自动转码成 MP3 再落回 语音/。
+     */
+    private static boolean submitToWorkDir(android.content.Context ctx, java.io.File src, String name) {
+        try {
+            if (ctx == null || src == null || !src.isFile() || src.length() <= 0) return false;
+            byte[] data = new byte[(int) src.length()];
+            java.io.FileInputStream in = new java.io.FileInputStream(src);
+            try {
+                int n = 0, r;
+                while (n < data.length && (r = in.read(data, n, data.length - n)) > 0) n += r;
+            } finally {
+                in.close();
+            }
+            String base = VoiceExport.baseName(name);
+            String file = "req_" + System.currentTimeMillis() + "_" + base + ".silk";
+            android.content.ContentValues v = new android.content.ContentValues();
+            v.put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, file);
+            v.put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream");
+            v.put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,
+                    android.os.Environment.DIRECTORY_DOWNLOADS + "/乐信/待转换");
+            android.net.Uri uri = ctx.getContentResolver()
+                    .insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, v);
+            if (uri == null) {
+                Log.d(T + "submit: insert 返回 null");
+                return false;
+            }
+            java.io.OutputStream os = ctx.getContentResolver().openOutputStream(uri);
+            if (os == null) {
+                Log.d(T + "submit: openOutputStream 失败");
+                return false;
+            }
+            try {
+                os.write(data);
+                os.flush();
+            } finally {
+                os.close();
+            }
+            Log.d(T + "submit ok: " + file + " " + data.length + "B");
+            toastPublic("语音已提交到工作目录，乐信会自动转成 MP3");
+            return true;
+        } catch (Throwable t) {
+            Log.d(T + "submit failed: " + t);
+            return false;
+        }
+    }
+
+    /**
+     * 取这条语音对应的文件（v1.7）。
+     *
+     * 顺序：① 微信自己的 API（8.0.80 上基本已经死了：mc0.b 只剩构造函数）
+     *       ② 文件系统索引（VoiceFinder：两级十六进制分片 + 名字/时间双匹配）
+     *
+     * 为什么要文件系统兜底：实测 voice2/<XX>/<YY>/msg_<hash>.amr，
+     * 老代码"平铺拼一个路径"必然失败，而用户看到的只是「没找到语音文件」。
+     */
+    private static java.io.File resolveVoice(Object msg) {
+        // ① 微信内部 API
+        try {
+            String amr = voicePathSilently(msg, lastTalker);
+            if (amr != null && !amr.isEmpty()) {
+                java.io.File f = new java.io.File(amr);
+                if (f.isFile() && f.length() > 0) {
+                    Log.d(T + "voice by api: " + f.getName());
+                    return f;
+                }
+            }
+        } catch (Throwable t) {
+            Log.d(T + "voice api failed: " + t.getClass().getSimpleName());
+        }
+        // ② 文件系统索引
+        try {
+            android.content.Context ctx = lastView == null ? null : lastView.getContext();
+            if (ctx == null) ctx = android.app.AndroidAppHelper.currentApplication();
+            if (ctx == null) return null;
+            String imgPath = readField(msg, "field_imgPath");
+            long ct = 0;
+            Object cto = fieldDeep(msg, "field_createTime");
+            if (cto instanceof Number) {
+                ct = ((Number) cto).longValue();
+                if (ct < 1000000000000L) ct *= 1000L;      // 秒 → 毫秒
+            }
+            java.io.File f = VoiceFinder.find(ctx, imgPath, ct);
+            Log.d(T + "voice by fs: " + (f == null ? "null" : f.getName())
+                    + " imgPath=" + imgPath + " ct=" + ct);
+            return f;
+        } catch (Throwable t) {
+            Log.d(T + "voice fs failed: " + t.getClass().getSimpleName());
+            return null;
+        }
+    }
+
+    /**
+     * v1.7：把语音文件字节交给模块进程转 MP3（零界面链路）。
+     *
+     * @return true = 已经接管（无论最终转码成败，结果都会走 VOICE_DONE 回微信侧 Toast）；
+     *         false = 这条路走不通，调用方应退回旧的「微信解码 AMR + ConvertActivity」路径
+     */
+    private static boolean exportByBus(String path, String name) {
+        try {
+            java.io.File f = new java.io.File(path);
+            // 512KB 以内才直传：Binder 事务上限约 1MB，留一半余量
+            if (!f.isFile() || f.length() <= 0 || f.length() > 512 * 1024) {
+                Log.d(T + "bus export skip: size=" + (f == null ? -1 : f.length()));
+                return false;
+            }
+            android.content.Context ctx = lastView == null ? null : lastView.getContext();
+            if (ctx == null) ctx = android.app.AndroidAppHelper.currentApplication();
+            if (ctx == null) return false;
+            byte[] silk = readAll(f);
+            if (silk == null || silk.length == 0) return false;
+            int kbps = (int) Storage.num(Prefs.K_VOICE_KBPS, 48);
+            String nm = (lastTalker == null || lastTalker.isEmpty() ? "" : lastTalker + "_")
+                    + (name == null || name.isEmpty() ? "voice" : name);
+            if (!CfgBus.exportVoice(ctx, silk, nm, kbps)) return false;
+            toast("正在导出语音…");
+            Log.d(T + "bus export: " + silk.length + "B name=" + nm + " rate=" + kbps);
+            return true;
+        } catch (Throwable t) {
+            Log.d(T + "bus export failed: " + t);
+            return false;
+        }
+    }
+
     private static boolean launchConvert(java.io.File silk, String name) {
         try {
+            // ★ v1.7.22（免 root 自审）：LSPatch/NPatch 内嵌模式下模块**没有独立进程**，
+            //   ConvertActivity 这个组件在宿主清单里根本不存在 —— 以前会先去试 PendingIntent，
+            //   再试 startActivity，两条都抛，最后给用户一句含糊的"组件缺失"。
+            //   这里提前判掉，调用方拿到准确原因（面板里也已经写了该框架不支持转码）。
+            if (Compat.isRootless()) {
+                Log.d(T + "launchConvert: rootless framework（没有独立模块进程）");
+                return false;
+            }
             android.content.Context ctx = lastView == null ? null : lastView.getContext();
             if (ctx == null) {
                 Log.d(T + "launchConvert: 没有 context");
@@ -1253,12 +1407,42 @@ final class ForwardPlus {
             if (data != null) ci.putExtra("silk_bytes", data);
             else ci.putExtra("silk", silk.getAbsolutePath());
             ci.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
-            // ★ 先解析一次：R8 把 ConvertActivity 裁掉时这里就会返回 null（否则是运行期崩/静默失败 ✗）
-            if (ctx.getPackageManager().resolveActivity(ci, 0) == null) {
-                Log.d(T + "launchConvert: 组件不可用（ConvertActivity 缺失/被裁剪）");
-                return false;
+            // ★ v1.7.1：**不要**再用 resolveActivity 做预检。
+            //   微信 targetSdk 34 且没有 QUERY_ALL_PACKAGES ⇒ 它看不见模块包
+            //   ⇒ resolveActivity 永远返回 null ⇒ 明明组件在，也被判成"组件缺失"
+            //   （真机症状：toast「没能启动转码（组件缺失）」，但文件其实已经定位到了）。
+            //   显式组件的 startActivity 不受包可见性限制，直接启动 + 接住异常才是对的。
+            // ★ v1.7.1 二次修：直接 startActivity 在微信里仍然抛 ActivityNotFoundException
+            //   （logcat 实证），而同样的组件用 shell 身份 `cmd package resolve-activity` 却能解析。
+            //   差别在于**谁做解析**：客户端的 PackageManager 被包可见性/HMA 挡了，
+            //   而 PendingIntent 由 system_server 侧解析并触发 —— 绕开客户端这道过滤。
+            boolean sent = false;
+            try {
+                android.app.PendingIntent pi = android.app.PendingIntent.getActivity(
+                        ctx, 0x4C45, ci,
+                        android.app.PendingIntent.FLAG_IMMUTABLE
+                                | android.app.PendingIntent.FLAG_UPDATE_CURRENT);
+                pi.send();
+                sent = true;
+                Log.d(T + "launchConvert: PendingIntent 已发出");
+            } catch (Throwable t) {
+                Log.d(T + "launchConvert: PendingIntent 失败 " + t);
             }
-            ctx.startActivity(ci);
+            if (!sent) {
+                try {
+                    ctx.startActivity(ci);
+                    sent = true;
+                } catch (Throwable t) {
+                    Log.d(T + "launchConvert: startActivity 也失败 " + t);
+                }
+            }
+            if (!sent) {
+                // ★ v1.7.2：跨进程全断的兜底 —— **在微信进程内直接把语音写进乐信工作目录**。
+                //   微信 targetSdk 34，用 MediaStore.Downloads 写文件**不需要任何存储权限**
+                //   （scoped storage 的标准能力），所以这条路不依赖包可见性、不依赖广播、不依赖 root。
+                //   写完由乐信 App 侧的监听器接手转码（见 WorkDirWatcher）。
+                return submitToWorkDir(ctx, silk, name);
+            }
             Log.d(T + "launchConvert ok: bytes=" + (data == null ? -1 : data.length)
                     + " path=" + silk.getAbsolutePath());
             return true;
@@ -1651,10 +1835,10 @@ final class ForwardPlus {
     // 微信 targetSdk 34、且**没有** MANAGE_EXTERNAL_STORAGE（本机 dumpsys 只申请了
     // READ_EXTERNAL_STORAGE）⇒ Android 11+ 的 scoped storage 让
     // `new File(Environment.getExternalStorageDirectory(), "Download/…")` 写不进去。
-    // 老代码没有兜底，导出会静默失败（实测 /sdcard/Download/乐信导出 这个目录根本不存在）。
+    // 老代码没有兜底，导出会静默失败（实测 /sdcard/Download/乐信/导出 这个目录根本不存在）。
     //
     // 现在分三层：
-    //   ① 公共「下载/乐信导出」—— 老系统或有权限的设备，用户直接可见
+    //   ① 公共「下载/乐信/导出」—— 老系统或有权限的设备，用户直接可见
     //   ② 微信自己的外部私有目录（Android/data/com.tencent.mm/files）—— 一定可写，
     //      内部工作文件（转 MP3 的输入、导出的原文件）走这里
     //   ③ 微信私有 files 目录 —— ② 都拿不到时保命
@@ -1663,7 +1847,7 @@ final class ForwardPlus {
     private static java.io.File exportDir() {
         try {
             java.io.File pub = new java.io.File(android.os.Environment.getExternalStorageDirectory(),
-                    "Download/乐信导出");
+                    "Download/乐信/导出");
             if (writable(pub)) return pub;
         } catch (Throwable ignored) {
             // 落到下一层
@@ -1671,14 +1855,14 @@ final class ForwardPlus {
         try {
             Context ctx = Features.app;
             java.io.File ext = ctx == null ? null : ctx.getExternalFilesDir(null);
-            java.io.File dir = new java.io.File(ext != null ? ext : ctx.getFilesDir(), "乐信导出");
+            java.io.File dir = new java.io.File(ext != null ? ext : ctx.getFilesDir(), "乐信/导出");
             if (writable(dir)) return dir;
         } catch (Throwable ignored) {
             // 落到下一层
         }
         java.io.File base = Features.app == null
                 ? new java.io.File("/data") : Features.app.getFilesDir();
-        java.io.File tmp = new java.io.File(base, "乐信导出");
+        java.io.File tmp = new java.io.File(base, "乐信/导出");
         tmp.mkdirs();
         return tmp;
     }
@@ -1697,7 +1881,7 @@ final class ForwardPlus {
     }
 
     /**
-     * 把一份文件放进公共「下载/乐信导出」：Android 10+ 走 MediaStore，不需要任何权限。
+     * 把一份文件放进公共「下载/乐信/导出」：Android 10+ 走 MediaStore，不需要任何权限。
      * 成功返回用户可见的相对路径；失败返回 null（调用方退回 exportDir 的绝对路径）。
      */
     private static String publishPublic(java.io.File src, String displayName) {
@@ -1709,7 +1893,7 @@ final class ForwardPlus {
             v.put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, displayName);
             v.put(android.provider.MediaStore.MediaColumns.MIME_TYPE, mimeOf(displayName));
             v.put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,
-                    android.os.Environment.DIRECTORY_DOWNLOADS + "/乐信导出");
+                    android.os.Environment.DIRECTORY_DOWNLOADS + "/乐信/导出");
             v.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1);
             uri = Features.app.getContentResolver()
                     .insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, v);
@@ -1731,7 +1915,7 @@ final class ForwardPlus {
             android.content.ContentValues done = new android.content.ContentValues();
             done.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0);
             Features.app.getContentResolver().update(uri, done, null, null);
-            return "下载/乐信导出/" + displayName;
+            return "下载/乐信/导出/" + displayName;
         } catch (Throwable t) {
             Log.d(T + "publish failed: " + t);
             try {
@@ -2228,9 +2412,32 @@ final class ForwardPlus {
         return null;
     }
 
-    /** 点我们那一项之后干什么：文本进剪贴板，媒体另存到 下载/乐信导出/。零联网、零伪造。 */
+    /** 点我们那一项之后干什么：文本进剪贴板，媒体另存到 下载/乐信/导出/。零联网、零伪造。 */
     private static String act(Object msg, String type) {
         try {
+            // ★ v1.7：语音消息在**两个入口**都要能导出 MP3。
+            //   以前只有九宫格「乐信」那一格（extractRestricted）走过语音链，
+            //   菜单项「转发（乐信）」到这里没有 type==34 分支，点它只会得到
+            //   "这一类型还不能导出（类型 34）" —— 同一个功能两种结果，用户当然觉得坏了。
+            int t = -1;
+            try {
+                t = Integer.parseInt(type == null ? "-1" : type.trim());
+            } catch (Throwable ignored) {
+            }
+            if (t == 34) {
+                java.io.File vf = resolveVoice(msg);
+                if (vf == null) {
+                    return "没找到这条语音的文件（重进聊天页再试一次）";
+                }
+                // ★ v1.7.1：不再走跨进程广播 —— 这台机器（ColorOS）的 Greezer 会把
+                //   微信发往模块 App 的广播全判成 "Greezer Denial" 丢弃（logcat 实证），
+                //   provider 和 bindService 又都被包可见性封死。只剩 Activity 跳板可用。
+                //   Activity 只负责把字节递进模块进程，转码落盘统一走 VoiceExport。
+                boolean ok = launchConvert(vf, readField(msg, "field_imgPath"));
+                return ok ? "正在导出语音…" : ("没能启动转码（"
+                        + (Compat.isRootless() ? "免 root 框架无独立模块进程" : "组件缺失") + "）");
+            }
+
             String content = readField(msg, "field_content");
             String path = readField(msg, "field_imgPath");
             if (path == null) path = readField(msg, "field_fileFullPath");

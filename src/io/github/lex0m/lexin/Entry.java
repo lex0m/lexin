@@ -97,6 +97,17 @@ public final class Entry implements IXposedHookLoadPackage, IXposedHookZygoteIni
                         @Override
                         protected void afterHookedMethod(MethodHookParam p) {
                             try {
+                                // ★ v1.7.22（免 root 框架兜底）：LSPatch/NPatch 用
+                                //   org.lsposed.lspatch.loader.LSPApplication / LSPAppComponentFactory
+                                //   顶替宿主 Application，个别分支不经过 Application.attach(Context)；
+                                //   那条 hook 不响 ⇒ install 永远不跑 ⇒ 模块"加载了但什么都不做"，
+                                //   而且默认零日志，现场看不出任何异常。onCreate 是最后一道可靠时点。
+                                //   install 幂等（installed 标志），重复调用无副作用。
+                                if (Features.app == null) {
+                                    Context c = (Context) p.thisObject;
+                                    Features.install(c, c.getClass().getClassLoader());
+                                    alive(android.app.Application.getProcessName());
+                                }
                                 ClassLoader tcl = Thread.currentThread().getContextClassLoader();
                                 if (tcl != null) Features.adoptLoader(tcl);
                                 Features.adoptLoader(

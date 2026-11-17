@@ -4,10 +4,10 @@
 
 **微信界面美化 + 本地功能增强** · Xposed / LSPosed 模块
 
-![version](https://img.shields.io/badge/version-1.6.2-4A6CF7?style=flat-square)
-![platform](https://img.shields.io/badge/Android-12%20~%2016-3DDC84?style=flat-square&logo=android&logoColor=white)
+![version](https://img.shields.io/badge/version-1.7.22-4A6CF7?style=flat-square)
+![platform](https://img.shields.io/badge/Android-9%20~%2016-3DDC84?style=flat-square&logo=android&logoColor=white)
 ![wechat](https://img.shields.io/badge/微信-8.0.72%20~%208.0.80-07C160?style=flat-square&logo=wechat&logoColor=white)
-![size](https://img.shields.io/badge/APK-670%20KB-8A8F9A?style=flat-square)
+![size](https://img.shields.io/badge/APK-1.9%20MB-8A8F9A?style=flat-square)
 ![license](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
 
 包名 `io.github.lex0m.lexin` · 作者 lex · 纯 Java · 无 Gradle
@@ -79,12 +79,14 @@
 
 ## 安装
 
-1. 装 [`lexin-1.5.0.apk`](../../releases)（或本仓库根目录的 APK）
+1. 装 [`lexin-1.7.22.apk`](../../releases)（或本仓库根目录的 APK）
 2. LSPosed 里勾选「乐信」，**作用域只勾微信**
 3. 强行停止微信，重新打开
 
-> 需要 root + LSPosed（或兼容框架）。没 root 走 [LSPatch](https://github.com/JingMatrix/LSPatch)，
-> 步骤与注意项见 [免 root 使用指南](免root使用指南.md)。
+> 没 root 就走免 root 框架，二选一（同一条技术路线，都是 Vector 核）：
+> **[LSPatch（JingMatrix fork）](https://github.com/JingMatrix/LSPatch/releases)** ·
+> **[NPatch（7723mod fork）](https://github.com/7723mod/NPatch/releases)**。
+> 代价是要重装微信（签名变了），步骤与能力边界见 [免 root 使用指南](免root使用指南.md)。
 
 ## 打开面板
 
@@ -97,6 +99,18 @@
 ---
 
 ## 兼容性
+
+### 框架
+
+| 框架 | 状态 | 说明 |
+| --- | --- | --- |
+| **LSPosed / Vector**（root） | 主力，全功能 | 模块独立安装、独立进程；语音转 MP3、独立设置页、开机自启都可用 |
+| **LSPatch**（免 root · [下载](https://github.com/JingMatrix/LSPatch/releases)） | 已适配 | 模块 dex 嵌进微信补丁包；素材改从宿主 assets 读，主题图与锚点表都能拿到 |
+| **NPatch**（免 root · [下载](https://github.com/7723mod/NPatch/releases)） | 已适配 | 与 LSPatch 同路线（Vector 核），走同一套兜底 |
+| 双开容器 / 虚拟机 | 不建议 | 容器特征明显，主号别用 |
+
+免 root 下没有独立模块进程：**语音转 MP3、独立设置页、开机自启不可用**，其余功能照常；
+面板诊断行会写明当前框架与素材来源。详细步骤见 [免 root 使用指南](免root使用指南.md)。
 
 ### Android
 
@@ -167,6 +181,19 @@ sh tools/build-audio.sh --test   # 重编音频库并自测
 ---
 
 ## 更新日志
+
+### v1.7.22（2026-11-17）— 免 root 框架自审：修掉三处「真机不生效」
+
+这一版不加功能，只让 LSPatch / NPatch 的适配真的能跑：
+
+- `DexPathList.Element.path` 是 `File` 不是 `String`，旧代码的 `instanceof String` 在真机上必然跳过 —— 整段兜底是死代码（已用本机 framework dex 实测字段类型）
+- 集成模式没有独立模块 APK（模块在宿主 `assets/lspatch|npatch/modules/`），新增读宿主 assets 的探路，主题图与加密锚点表在免 root 下也能读
+- 「同 loader ⇒ 内嵌」判据在 Vector 下恒假（模块用 `VectorModuleClassLoader` + `ByteBufferDexClassLoader`），免 root 会被误报成 LSPosed 且缓存错值 —— 改成注入产物优先、判不出来不缓存
+- 免 root 下语音导出先判模块组件是否可达，不再假装成功；`Application.attach` 不触发时用 `onCreate` 幂等兜底；面板诊断行写清资源来源与免 root 能力边界
+
+> 这次提交同时带入 v1.7.0 ~ v1.7.21 的全部改动（此前只在本地，未推送）。
+> 真机打补丁（要卸载正版微信）仍未验证，面板 `os=` 与主题图的实际显示以机主环境为准。
+> 逐条清单见 [`更新说明-v1.7.22.md`](更新说明-v1.7.22.md)。
 
 ### v1.6.2（2026-11-16）— 全盘复审：自检复活 + 背景图通道 + 构建可复现
 

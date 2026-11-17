@@ -23,11 +23,15 @@ final class Prefs {
     static final String K_FWD_SELECT = "fwd_select";
     /** v1.3 新功能开关（默认关，见 Storage 注释）。 */
     static final String K_VOICE_TEXT = Storage.K_VOICE_TEXT;
+    /** v1.7.8 语音导出码率（kbps，默认 48；面板可选 32/48/64）。 */
+    static final String K_VOICE_KBPS = Storage.K_VOICE_KBPS;
     static final String K_FLOAT_FOOTER = Storage.K_FLOAT_FOOTER;
     static final String K_BATCH_LABEL = Storage.K_BATCH_LABEL;
     static final String K_HOME_FLOAT_TAB = Storage.K_HOME_FLOAT_TAB;
     /** v1.5 环境隐蔽（默认开）。 */
     static final String K_STEALTH = Storage.K_STEALTH;
+    /** v1.7 拍一拍防误触：双击头像不再拍出去（默认关）。 */
+    static final String K_PAT_BLOCK = "pat_block";
 
     /** ctx is ignored now - the store is file based and process independent. */
     static void init(Context ctx) {
@@ -50,7 +54,9 @@ final class Prefs {
                 || K_STEALTH.equals(key)                                   // 环境隐蔽默认开：不是功能，是前提
                 || K_DICE.equals(key) || K_FIST.equals(key)                // 骰子/猜拳默认开（用户 2026-11-10 要求：别再每次手动开）
                 || K_FWD_MENU.equals(key) || K_FWD_SELECT.equals(key)    // 转发增强默认开（本地 UI 功能，零联网）
-                || K_RECALL_SELF.equals(key);                            // 自己撤回也拦（用户要求：不然不知道有没有生效）
+                || K_RECALL_SELF.equals(key)                             // 自己撤回也拦（用户要求：不然不知道有没有生效）
+                // v1.7.4：这项改默认开 —— 真机验证过 hook 挂得上（拍一拍 armed=1），且是"少打扰"方向。
+                || K_PAT_BLOCK.equals(key);
     }
 
     /** 带默认值读取：hook 路径一律用这个，省得两处默认值写岔。 */

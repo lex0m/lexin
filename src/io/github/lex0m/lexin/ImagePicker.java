@@ -165,6 +165,9 @@ final class ImagePicker {
             Log.d(T + "background saved via " + how + " -> " + written + "B");
 
             Storage.setStr(which, "host");
+            // 换图版本号：微信进程靠它判断卡片图缓存是否过期（跨进程拿不到文件 mtime）。
+            // 不写这一行，换图要等重启微信才生效 —— v1.7.10 之前就是这样。
+            if (card) Storage.setStr(Beautify.K_CARD_REV, String.valueOf(System.currentTimeMillis()));
             Storage.setOn(Storage.K_THEME, true);
             new Handler(Looper.getMainLooper()).post(new Runnable() {
                 @Override

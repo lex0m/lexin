@@ -14,6 +14,13 @@
 #   2026-10-17 实测：ConvertActivity 在 dex 里连类描述符都不存在 ⇒ 拉起必失败。
 #   新增任何组件（activity/service/receiver/provider）都必须在这里补一条 keep。
 -keep class io.github.lex0m.lexin.ConvertActivity { *; }
+# v1.7.2 新增 Application：只被 AndroidManifest 引用，R8 看不到调用方会直接裁掉
+# （verify_apk 报「组件类不在 dex 里」就是这一条）。
+-keep class io.github.lex0m.lexin.LexinApp { *; }
+-keep class io.github.lex0m.lexin.WorkService { *; }
+-keep class io.github.lex0m.lexin.BootReceiver { *; }
+# v1.7.11 无界面诊断导出：只被 manifest 引用，R8 会整类裁掉（同 ConvertActivity 那次）
+-keep class io.github.lex0m.lexin.DiagActivity { *; }
 
 # JNI：native 方法被改名 = 找不到符号 = UnsatisfiedLinkError
 -keepclasseswithmembernames class * {
@@ -32,6 +39,11 @@
 
 # 我们自己在代码里按字符串查的类
 -keep class io.github.lex0m.lexin.HostInfo { *; }
+
+# v1.7.10 卡片图真模糊：CardBlur 只在 `Build.VERSION.SDK_INT >= 31` 分支里被调用。
+# R8 看不到「一定被调用」，会把它当死代码删掉 ⇒ Android 12+ 上模糊静默失效（没有报错，最坏的那种失效）。
+# 同时它是**故意隔离**的类（RenderEffect 是 API 31 类型，写在 Beautify 里会让低版本 VerifyError 连坐）。
+-keep class io.github.lex0m.lexin.CardBlur { *; }
 
 # ★ 活性自检：SelfCheck 要 hook 这个方法、再反射调用它。
 #   R8 判定 `pulse()` 只往一个没人读的 int 里 +1（`beat` 全仓库无读者）⇒ **整个方法被删掉**，
@@ -81,3 +93,14 @@
     public int delete(android.net.Uri, java.lang.String, java.lang.String[]);
     public int update(android.net.Uri, java.lang.String, java.lang.String[], android.content.ContentValues);
 }
+
+# ── v1.7.6 DexKit（全程反射调用，R8 看不到调用方会整个裁掉）──
+# 踩过的坑：不加这几条，dex 里连 DexKitBridge 这个类都没有，
+# 而字符串 "luckypray"/"DexKitBridge" 还在 —— 排查时极容易以为是 native 库没加载。
+-keep class org.luckypray.dexkit.** { *; }
+-keep class com.google.flatbuffers.** { *; }
+-keep class kotlin.** { *; }
+-keep class kotlinx.** { *; }
+-dontwarn org.jetbrains.annotations.**
+-dontwarn kotlin.jvm.internal.**
+-dontwarn kotlin.**

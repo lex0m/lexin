@@ -266,6 +266,9 @@ final class Stealth {
                 protected void beforeHookedMethod(MethodHookParam p) {
                     try {
                         if (!Prefs.onDefault(Prefs.K_STEALTH)) return;
+                        // ★ v1.7（C-01 自噬）：本模块自己读 APK 路径时就放行，
+                        //   否则隐蔽功能一开，锚点表永远读不到 ⇒ 全功能静默哑。
+                        if (Boolean.TRUE.equals(Assets.SELF_QUERY.get())) return;
                         if (p.args == null || p.args.length == 0) return;
                         if (!OURS.equals(p.args[0])) return;
                         p.setThrowable(new PackageManager.NameNotFoundException(OURS));

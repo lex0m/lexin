@@ -108,26 +108,23 @@ public class ConvertActivity extends Activity {
         }
         if (frames.length < 8) return "语音数据为空（" + raw.length + "B）";
 
-        String base = cleanName(name);
-        File temp = new File(getCacheDir(), "mp3");
-        if (!temp.exists() && !temp.mkdirs()) return "无法创建临时目录";
-        File mp3 = new File(temp, base + "-" + System.currentTimeMillis() + ".mp3");
+        // ★ v1.7：转码与落盘统一走 VoiceExport（乐信工作目录 + 索引 + 码率可选）。
+        //   为什么保留 Activity：实测这台机器（ColorOS）的 Greezer 会把跨进程广播全部
+        //   判成 "Greezer Denial" 丢弃，而 provider / bindService 又被包可见性封死
+        //   ⇒ 微信和模块 App 之间现在只剩 Activity 这一条能把字节递过去的通道。
+        //   Activity 仍然只是跳板：它自己不做任何 IO 逻辑，转码落盘都在 VoiceExport 里。
+        VoiceExport.R r = VoiceExport.convert(this, frames, name, kbpsOf());
+        if (!r.ok()) return "转换失败：" + r.err;
+        return "语音已导出 MP3：" + r.shown + "（" + Math.max(1, r.size / 1024) + "KB）";
+    }
 
-        // ★ JNI 符号必须与 .so 导出的一致：Java_io_github_lex0m_lexin_SilkCodec_silkToMp3
-        //   （当前 .so 是按 SilkCodec 这个名字编的；改成别的类名会 UnsatisfiedLinkError ✗）
-        int rc = SilkCodec.encode(frames, mp3.getAbsolutePath(), 32);
-        Log.a("conv: frames=" + frames.length + " rc=" + rc + " mp3=" + mp3.length());
-        if (rc != 0 || !mp3.isFile() || mp3.length() <= 0) {
-            deleteQuietly(mp3);
-            return "转码失败 rc=" + rc + "（输入 " + frames.length + "B）";
-        }
-
+    /** 面板里配的码率（默认 48kbps；语音用 32 也够）。键见 {@link Storage#K_VOICE_KBPS}。 */
+    private static int kbpsOf() {
         try {
-            String where = publish(mp3, base + ".mp3");
-            Log.a("conv: published " + where);
-            return "语音已转成 MP3：" + where + "（" + Math.max(1, mp3.length() / 1024) + "KB）";
-        } finally {
-            deleteQuietly(mp3);
+            int v = (int) Storage.num(Prefs.K_VOICE_KBPS, 48);
+            return v <= 0 ? 48 : v;
+        } catch (Throwable t) {
+            return 48;
         }
     }
 
@@ -138,7 +135,7 @@ public class ConvertActivity extends Activity {
             v.put(MediaStore.MediaColumns.DISPLAY_NAME, fileName);
             v.put(MediaStore.MediaColumns.MIME_TYPE, "audio/mpeg");
             v.put(MediaStore.MediaColumns.RELATIVE_PATH,
-                    Environment.DIRECTORY_DOWNLOADS + "/乐信导出");
+                    Environment.DIRECTORY_DOWNLOADS + "/乐信/导出");
             v.put(MediaStore.MediaColumns.IS_PENDING, 1);
             Uri uri = null;
             try {
@@ -151,7 +148,7 @@ public class ConvertActivity extends Activity {
                         ContentValues done = new ContentValues();
                         done.put(MediaStore.MediaColumns.IS_PENDING, 0);
                         getContentResolver().update(uri, done, null, null);
-                        return "Download/乐信导出/" + fileName;
+                        return "Download/乐信/导出/" + fileName;
                     }
                 }
             } catch (Throwable ignored) {
@@ -166,9 +163,9 @@ public class ConvertActivity extends Activity {
         }
 
         File ext = getExternalFilesDir(null);
-        File dir = ext == null ? null : new File(ext, "乐信导出");
+        File dir = ext == null ? null : new File(ext, "乐信/导出");
         if (dir == null || (!dir.exists() && !dir.mkdirs())) {
-            dir = new File(getFilesDir(), "乐信导出");
+            dir = new File(getFilesDir(), "乐信/导出");
             if (!dir.exists() && !dir.mkdirs()) throw new Exception("没有可写目录");
         }
         File out = new File(dir, fileName);

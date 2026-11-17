@@ -136,6 +136,27 @@ public class SettingsActivity extends Activity {
                                 : "诊断日志已关闭（发布版默认不写任何日志）");
                     }
                 });
+        Ui.actionRow(this, g4, "一键诊断导出",
+                "环境 · 配置 · 锚点 · 状态 · 日志 → Download/乐信/诊断/", Ui.OK, new Runnable() {
+                    @Override
+                    public void run() {
+                        toast("正在打包诊断信息…");
+                        new Thread(new Runnable() {
+                            @Override
+                            public void run() {
+                                final String where = Diagnosis.export(SettingsActivity.this);
+                                runOnUiThread(new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        toast(where == null
+                                                ? "导出失败（权限或磁盘问题）"
+                                                : "已导出：" + where);
+                                    }
+                                });
+                            }
+                        }, "lexin-diag").start();
+                    }
+                });
         root.addView(g4);
 
         LinearLayout g3 = Ui.card(this);

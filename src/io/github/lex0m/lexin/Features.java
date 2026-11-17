@@ -91,6 +91,7 @@ final class Features {
             step(SelfCheck::install);
             step(Settings::install);
             step(FwdProbe::probe);      // 转发增强探针：只在诊断日志打开时输出，用来定位挂点
+            step(PatProbe::install);    // v1.7.8：拍一拍双击入口探针（同样只在诊断模式工作；此前是孤儿类）
         }
         // ── 核心：随启动装（撤回 / 朋友圈 / 去广告 / 步数）──
         step(AntiRecall::install);
@@ -115,10 +116,13 @@ final class Features {
                     MediaSaver::install,
                     Limits::install,
                     EmojiGame::install,
+                    PatGuard::install,       // v1.7 拍一拍防误触（默认关）
+                    DexProbe::install,        // v1.7.6：DexKit 按字符串找类的验证探针（只在诊断模式）
                     Beautify::install,
                     Theme::install,
                     FloatingFooter::install,
                     HomeFloatingTab::install,
+                    Holo::install,            // v1.7.13 全息透明（窗口半透明，桌面实时透出）
             });
         }
 
@@ -154,7 +158,13 @@ final class Features {
         if (cl == null || cl == loader) return;
         loader = cl;
         Loaders.reset();          // 重新收集（补丁 dex 的 loader 此时已可见）
+        DexFind.resetCache();     // v1.7.9：同一特征在新 dex 里可能指向别的类，缓存必须作废
+        Compat.invalidate();      // 环境快照重算（hostVersion 等可能已变）
         Anchors.clearCacheOnly();
+        // v1.7.22：换 loader 也意味着"模块 APK 的来源可能变了"（例如从补丁包 assets 切到
+        // 运行时 loader 里的那份），让 Assets 重新探一次，别把早期失败的结论一直用下去。
+        Assets.resetProbe();
+        Anchors.retry();          // v1.7：换 loader 是"环境变了"，值得再读一次锚点表（C-01 自愈）
         if (loaderAdopted) return;
         loaderAdopted = true;
         Log.d("svc-core: adopted runtime loader " + cl);
@@ -232,6 +242,7 @@ final class Features {
             // 关键：先把「解析失败」留下的空缓存清掉，否则下面的重装读到的还是空表，
             // 扫描结果一辈子用不上（v1.5 的实际行为）。
             Anchors.clearMisses();
+            Anchors.retry();          // v1.7：扫描完成后环境已变，先补读表（C-01）
             if (!Status.ok("消息防撤回")) step(AntiRecall::install);
             if (!Status.ok("朋友圈保留")) step(SnsGuard::install);
             if (!Status.ok("去广告")) step(AdBlock::install);

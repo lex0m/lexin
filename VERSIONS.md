@@ -6,6 +6,22 @@
 
 | 版本 | 发布日期 | 文件 | 大小 | sha256 |
 | --- | --- | --- | --- | --- |
+| **v1.7.22（免 root 自审轮：修 10 个不落到真机的问题）** | 2026-11-17 | `dist/lexin-1.7.22.apk` | 1,898,780 B | `08f93877098d34e783e3874b226bff01c5a3ba2bef56e01b5d3d1f0e32bb4c2f` |
+| **v1.7.21（免 root 框架 LSPatch/NPatch 代码级适配）** | 2026-11-17 | `dist/lexin-1.7.21.apk` | 1,898,780 B | `ee9cc6b8ac9175d2a7b118cd442218bf481445d544af8e8db16982ca000403fa` |
+| **v1.7.20（全息透明 · 整窗 alpha + FLAG_SHOW_WALLPAPER）** | 2026-11-17 | `dist/lexin-1.7.20.apk` | 1,882,396 B | `5647a65752f7dfbdfe77e22733de97b629f960d8eec8c6512fa051d1bdc764b9` |
+| **v1.7.12（无壁纸时黑屏/黑字/竖条残影：拦截器加总闸）** | 2026-11-17 | `dist/lexin-1.7.12.apk` | 1,898,780 B | `672d2a35e733ea775d02475446dad73d3faf9eb277585f5660f72263b0f9860d` |
+| **v1.7.11（一键诊断导出 + adb 触发口 + 日志环形缓冲）** | 2026-11-17 | `dist/lexin-1.7.11.apk` | 1,898,780 B | `c9837bd4db7bc2a2b02fb4abe8d787cd1e139f574932f37ae5e634b4420e4815` |
+| **v1.7.10（聊天条背景图/裁剪/模糊三个假开关收口）** | 2026-11-17 | `dist/lexin-1.7.10.apk` | 1,882,396 B | `a72d2a630d89b3dc73ded608d336035c7611ca262e10d266914f2fc1bdb1b831` |
+| **v1.7.9（系统兼容层·FGS onTimeout·DexKit 兜底·兼容性三档结论）** | 2026-11-17 | `dist/lexin-1.7.9.apk` | 1,882,396 B | `93323405a3d4136cb9c571e3016fae2b5d1c0e728f174d4f337c7e9be79ae81d` |
+| v1.7.8（码率可选 UI · 版本警示 · 目录统一 · dex-find 中文假阴性修复） | 2026-11-17 | 产物**未保留**（同版本号被重编覆盖，未分发） | — | 首编 `d38d9434…ccc0b92e`（已失效） |
+| v1.7.7（下线「禁止上报输入状态」·7 处改动可逆） | 2026-11-17 | 产物**未保留**（同版本号被重编覆盖，未分发；源码状态 = `归档/src-before-typing-removal-20261117.tar.gz` + 后续删除项） | — | 首编 `580439a8d8e474f18e4478a45cb17b669408be0581f76e021c1e31730266de4f`（已失效） |
+| **v1.7.6（DexKit 集成成功·输入状态改用真实类 k1）** | 2026-11-17 | `dist/lexin-1.7.6.apk` | 1,882,396 B | `2f2ef15d8858bf38d0736ea171457bd705a80ebbdcff1d4dca455f3458fd4431` |
+| **v1.7.5（输入状态收窄到只拦 n1·降低误拦风险）** | 2026-11-17 | `dist/lexin-1.7.5.apk` | 735,444 B | `c3ef4d215f15b76865420ad7d3640afab606d477c9abdc048b8f569daa0b2e83` |
+| **v1.7.4（输入状态加 URI 自证探针）** | 2026-11-17 | `dist/lexin-1.7.4.apk` | 735,444 B | `b3c4e4eecf51b92576593fc6b08da05dc29fa15eb860ac582ebb7c2ce256fa0a` |
+| **v1.7.3（输入状态锚点修正·拍一拍代理监听器·坏槽位标注）** | 2026-11-17 | `dist/lexin-1.7.3.apk` | 735,444 B | `e376d448fc5ae4253108f6040f5e75d7e7f240ab3cac2e28c9bff97c882899ec` |
+| **v1.7.2（拍一拍改代理监听器·触屏事故回退·不碰触摸）** | 2026-11-16 | `dist/lexin-1.7.2.apk` | 735,444 B | `43e0c89e3a5712d89b366a53706961cad0ff0255ea3e6e8b4ade4f50f0be8494` |
+| v1.7.1（拍一拍挂 onTouchEvent → **导致微信触屏失效，勿用**） | 2026-11-16 | `dist/lexin-1.7.1.apk` | 735,444 B | `c312f589eb2b00a686e38be8bbd94df91d963d15bd0d98547ed3192fa7483d0b` |
+| **v1.7.0（面板三态·语音零界面导出 MP3·液态玻璃L0·三条根因修复）** | 2026-11-16 | `dist/lexin-1.7.0.apk` | 735,444 B | `62464afb20f88c058ec03d1f30398b427b796882a1426967dba453d63bde45b5` |
 | **v1.6.3（自动原图 / 骰子猜拳 / 撤回标记 真修好）** | 2026-11-16 | `dist/lexin-1.6.3.apk` | 686,292 B | `ac763bacbe7b96d484320d185761eb2d3a9d8970b15a14fadd2998b20f207d58` |
 | **v1.6.2（全盘复审：自检复活 + 背景图通道 + 构建可复现）** | 2026-11-16 | `dist/lexin-1.6.2.apk` | 686,292 B | `7e776044d48a65612c9508698e43d8e42261bfbb27b0d0b58504d05829b552a7` |
 | v1.6.1（阻断修复 Features.app 空 + P1 隐蔽收敛） | 2026-11-16 | `dist/lexin-1.6.1.apk` | 686,292 B | `435d0a42de9e5d618b934f8faef2cf8254d778c19ecb6c72af470e1b028e53cc`（注：旧记录写的 `e0ead57f…` 是随机锚点密钥时代的产物，同源码重编会变） |
@@ -38,6 +54,14 @@
 源码包（v1.1）：`成品/v1.1/乐信-v1.1-源码.tar.gz`
 sha256 `0cbc4205f5dc341709623bcc18d0495cb2072e7f481e8a93f0d5da28c1e2d65c`
 
+源码包（v1.7.22）：`成品/v1.7.22/乐信-v1.7.22-源码.tar.gz`
+sha256 `a45f39be8795aacd9c1f93163d2546e57784232013a45b4b9667b65a9fe178e9`（1,121,647 B）
+成品包：`成品/v1.7.22/乐信-v1.7.22.apk` · `08f93877098d34e783e3874b226bff01c5a3ba2bef56e01b5d3d1f0e32bb4c2f`
+
+源码包（v1.7.20）：`成品/v1.7.20/乐信-v1.7.20-源码.tar.gz`
+sha256 `1a40a4a91a504a6d720f661c96e0a1eaddf66bd3f4dd115df0163391fbc091ae`（1,109,518 B）
+成品包：`成品/v1.7.20/乐信-v1.7.20.apk` · `5647a65752f7dfbdfe77e22733de97b629f960d8eec8c6512fa051d1bdc764b9`
+
 源码包（v1.3.6）：`成品/v1.3.6/乐信-v1.3.6-源码.tar.gz`
 sha256 `97e34e692708dccf41b0b7bdba9cf51ec0554912799ab7c7f433d426de2213ba`
 
@@ -58,6 +82,57 @@ sha256 `82e36b69979279f0449b2b590da2aaafd6a6b3e42ff88ec221df2b81d920c27b`
 
 源码包（v1.3.0）：`成品/v1.3.0/乐信-v1.3.0-源码.tar.gz`
 sha256 `42582744023e5c31ea8bf43e717cca5defaed1b7f0159eee0db7da1b17c22116`
+
+## v1.7.13 ~ v1.7.19（2026-11-17 · 全息透明的踩坑过程版，**不要分发**）
+
+八版都在 `dist/` 里留着，只为可回溯；正式版是 v1.7.20。
+
+| 版本 | 试了什么 | 结果 |
+|---|---|---|
+| 1.7.13 | Holo 骨架：`format=TRANSLUCENT` + `LayoutParams.alpha` | 冷启动不生效（模块比 Activity 晚 1.2s 装） |
+| 1.7.14 | 加 `Status` 探针 | 定位到"hook 挂上但从没被调用" |
+| 1.7.15 | 挂 `ActivityThread.handleResumeActivity` + 安装时补扫已有 Activity | 冷启动立刻可见；55% 时整屏灰 |
+| 1.7.16 | `onCreate` 从 before 改 after；背景只设一次 | 仍不透 —— 底下是黑 |
+| 1.7.17 | 每次都重压 alpha | **花屏**（重影/错位） |
+| 1.7.18 | 加 `FLAG_SHOW_WALLPAPER` | 壁纸层从 `hidden by parent` 变成 `nothing to draw`（系统不再挡） |
+| 1.7.19 | 全息模式下走"清底"链，想连列表背景一起透掉 | **花屏**（重影/错位/竖条）—— 确认这条路走不通 |
+| 1.7.20 | 回滚清底，只做整窗 alpha + 每窗口只压一次 | ✅ 稳定，正式版 |
+
+## v1.7.21 改了什么（2026-11-17）
+
+1. **免 root 框架适配（代码级，未动微信）**：`Assets.fromClassLoader()` 从 DexPathList 取模块 APK
+   （本地模式下 LSPatch/NPatch 会把模块挂进去），`resolvePath()` 变三级兜底；新增 `themeAvailable()`。
+2. **框架识别**：`Compat.detectInjected()` 先读宿主 APK 的 `assets/lspatch/` 与 `assets/npatch/`
+   判定注入产物，再退回同 loader 判定；`status.txt` 的 `os=` 现在明确写 LSPatch/内嵌、NPatch/内嵌。
+3. **面板**：主题素材读不到时如实提示，不再让人以为整模块坏了。
+4. 回归：LSPosed 下 `os=LSPosed/Xposed`、`src=table9`、去广告 armed=4，全部正常；免 root 真机未验（E1）。
+
+## v1.7.20 改了什么（2026-11-17）
+
+1. **全息透明（新增）**：`Holo.java` —— 窗口 `format=TRANSLUCENT` + `LayoutParams.alpha` +
+   `FLAG_SHOW_WALLPAPER`，让微信整窗半透明、底下实时透出来。面板六档（60~100%，默认 70）。
+2. **关键发现**：不加 `FLAG_SHOW_WALLPAPER`，WMS 会把 `WallpaperWindowToken` 整个隐藏
+   （dump 实证：`ImageWallpaper invisible reason=hidden by parent or layer flag`），
+   这就是之前"怎么调 alpha 都只看到黑"的根因。加了之后变成 `nothing to draw` ——
+   系统不再挡，是动态壁纸引擎在应用全屏时自己暂停。
+3. **硬限制（写进代码注释，别再试）**：清底（`clearOpaquePages`）+ 半透明 Surface = 必然花屏
+   （1.7.17 / 1.7.19 两次真机实测：重影、错位、竖条）。全息只做整窗 alpha，不清任何 View 底色。
+4. 每个窗口只压一次属性：反复 `setAttributes` 会反复重建 Surface，就是重影的来源。
+5. 证据：`文档/证据-1.7.20-全息透明/`（成功 / 100% 对照 / 清底花屏 三张）。
+
+## v1.7.12 改了什么（2026-11-17）
+
+1. **主页黑屏 / 黑字 / 竖条残影**（用户 10:58 报，11:02 真机复现）：
+   把自定义背景清掉（`bf_bg=host`）后，`Beautify.hookVeto()` 这个常驻 hook 照样拒绝微信给
+   会话列表 / 页面容器 / 宽底板设背景，而我们手里没有图可铺 ⇒ 白底被拒后露出窗口的黑：
+   头像与彩色文字还在，昵称/时间/预览全看不见，未重绘的脏区形成竖条残影。
+2. **修法**：新增 `paintActive()/hasWallpaper()` 总闸，`setBackground*` 三条拦截全部加闸门；
+   `belongsToList` 那条改成只在卡片化开着时拒（卡片自己补白）；`applyPageStructure` /
+   `clearOpaquePages` / `slice` / 圆角化在无图时直接不跑。**无壁纸 = 零干预宿主渲染。**
+3. 顺手修「背景删了还在」：`paint()` 里 `ensureImage` 失败且有旧图时调 `dropWallpaper()`，
+   撤掉 BarDrawable/TopBandDrawable 并还原窗口背景色。
+4. 证据：E4（冷启 / 前后台 / 切页 / 连滑两屏均正常，四张截图在 `文档/证据-1.7.12-黑屏修复/`）；
+   「有壁纸回归」与「有图→无图的运行时自愈」未实测，标 E1。
 
 ## v1.3.6 改了什么（2026-10-26）
 

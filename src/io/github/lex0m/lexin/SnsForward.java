@@ -586,7 +586,7 @@ final class SnsForward {
                         "lexin_sns_" + System.currentTimeMillis() + "_" + (i + 1) + ".png");
                 v.put(MediaStore.MediaColumns.MIME_TYPE, "image/png");
                 if (Build.VERSION.SDK_INT >= 29) {
-                    v.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/乐信导出");
+                    v.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/乐信/导出");
                 }
                 Uri uri = cr.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, v);
                 if (uri == null) continue;
@@ -609,14 +609,14 @@ final class SnsForward {
         return i;
     }
 
-    /** 视频先落到 MediaStore.Video（Movies/乐信导出），再以 video/mp4 分享。 */
+    /** 视频先落到 MediaStore.Video（Movies/乐信/导出），再以 video/mp4 分享。 */
     private static Intent videoIntent(File video) {
         try {
             ContentValues v = new ContentValues();
             v.put(MediaStore.MediaColumns.DISPLAY_NAME, "lexin_sns_" + System.currentTimeMillis() + ".mp4");
             v.put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4");
             if (Build.VERSION.SDK_INT >= 29) {
-                v.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/乐信导出");
+                v.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/乐信/导出");
             }
             ContentResolver cr = Features.app.getContentResolver();
             Uri uri = cr.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, v);

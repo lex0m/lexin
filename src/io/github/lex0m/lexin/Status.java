@@ -131,6 +131,10 @@ final class Status {
                 .append("v=").append(Features.MODULE_VERSION)
                 .append("|wx=").append(WxVersion.name())
                 .append("|code=").append(WxVersion.code())
+                // v1.7.9：环境快照（系统版本 / ROM / 框架形态）——排查"换了手机就不灵"的第一眼信息
+                .append("|os=").append(sanitize(Compat.snapshot(Features.app)))
+                // v1.7.9：各解析来源计数 —— 证明 DexKit 兜底有没有真的接管
+                .append("|src=").append(Anchors.sourceSummary())
                 .append("|pid=").append(android.os.Process.myPid())
                 .append("|ts=").append(now)
                 .append('\n');

@@ -10,7 +10,6 @@ import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.Rect;
 import android.graphics.RectF;
-import android.graphics.RenderEffect;
 import android.graphics.Shader;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
@@ -83,7 +82,9 @@ final class Beautify {
     /** 调试用：dump 视图树。页面处理按实际结构写，不靠猜 */
     static final String K_DUMP = "bf_dump";
 
-    // 保留这些键只为设置界面能编译；玻璃与每卡带图是有意去掉的：卡片带图会跟着列表滚动，背景看起来在跟着走。
+    // v1.7.10：这五个键以前是「只为设置界面能编译」的死键（面板上标着「暂未实现」），
+    // 现在全部接上真读取：图片打底、百分比裁剪、API31+ 真模糊。见 ensureCardImage()。
+    // 与全屏背景图是两件事：卡片图跟着列表滚动（卡片本来就该跟内容走），不参与壁纸定位。
     static final String K_CARD_GLASS = "bf_card_glass";
     static final String K_CARD_BLUR_ON = "bf_card_blur_on";
     static final String K_CARD_BLUR_R = "bf_card_blur_r";
@@ -92,6 +93,11 @@ final class Beautify {
     static final String K_CARD_CY = "bf_ccy";
     static final String K_CARD_CW = "bf_ccw";
     static final String K_CARD_CH = "bf_cch";
+    /**
+     * 卡片图的「换图版本号」。面板换图时写一个时间戳，微信进程靠它判断缓存是否过期
+     * ——没有这一步就只能等重启微信才换图（跨进程拿不到文件 mtime，provider 也不报大小）。
+     */
+    static final String K_CARD_REV = "bf_card_rev";
     static final String CARD_FILE = ".card.dat";
 
     /** 微信 8.0.78 的会话列表类名（取自锚点表） */
@@ -167,6 +173,57 @@ final class Beautify {
     /** 顶部栏用的不透明壁纸副本。半透明会让栏后的东西透出来，标题就渲染两次。 */
     private static Bitmap imgBgOpaque;
     private static String imgKey = "";
+
+    /** 手里有没有「自己的壁纸」可以铺。铺不了就不能清宿主的底色——清了后面什么都没有。 */
+    private static boolean hasWallpaper() {
+        return imgBg != null || imgBgOpaque != null;
+    }
+
+    /**
+     * 「允许动宿主底色」的总闸（v1.7.12 修主页黑屏 / 竖条残影）。
+     *
+     * 真机 2026-11-17 11:02 复现：设置里把自定义背景清掉（`bf_bg=host`，我们手里没有图），
+     * 但 {@link #hookVeto()} 是进程启动就挂上的常驻 hook，照样拒绝微信给会话列表 / 页面容器 /
+     * 宽底板设背景。结果微信主页的白色列表底被拒 → 露出窗口的黑色 → 黑字压黑底：
+     * 头像、emoji、红字还在，昵称/时间/消息预览全看不见；滚动过的地方留下没重绘的竖条残影。
+     *
+     * 判据只有一条：**我们有图才动宿主的底色**。没图就整条外观链闭嘴，让微信原样画。
+     * 卡片化是另一条独立的路（CardDrawable 自己补白），不受这个闸门影响。
+     */
+    private static boolean paintActive() {
+        return clearAllowed();
+    }
+
+    /**
+     * 能不能清宿主的底色。
+     *
+     * 两条路各给一个"背后确实有东西"的理由：
+     *   - 有壁纸图 → 清掉底色，壁纸从底下透出来；
+     *   - 全息透明开着 → 窗口本身已经半透明，清掉底色透出来的是**系统桌面**（v1.7.13）。
+     *
+     * 两条都不成立就一步都不许动（1.7.12 的黑屏就是拿"没有图"当"有图"清出来的）。
+     */
+    private static boolean clearAllowed() {
+        // ★ 全息透明（Holo）故意**不**进这个闸门。
+        //   清底 + 半透明 Surface 在微信上必然花屏（1.7.17 / 1.7.19 两次真机实测：
+        //   内容重影、错位、竖向条纹）。全息只做「整窗 alpha」这一件事，不碰任何 View 底色。
+        return hasWallpaper();
+    }
+    /** 卡片图（已经按面板参数裁剪/模糊好，所有行共用一张，绘制时只做 center-crop 缩放）。 */
+    private static Bitmap imgCard;
+    private static String imgCardKey = "";
+    /**
+     * 面板自己开着时不铺卡片图。
+     *
+     * 真机 2026-11-17 发现：卡片化是挂在 adapter 上的，面板里的「裁剪区域」这类对话框同样用
+     * RecyclerView，而且宽度是本屏的 85%（不是窄行）⇒ 铺上图之后选项文字压在棋盘格上看不清。
+     * 判据放在「谁开着」这一层最稳：面板自己的 UI 一律用纯色卡片。
+     */
+    private static volatile boolean panelOpen;
+
+    static void setPanelOpen(boolean on) {
+        panelOpen = on;
+    }
 
     /** 替换背景前记录的窗口原色（只记一次）。系统状态栏是透明的，窗口画什么就露出什么，所以要把它原来的颜色还给状态栏，图标才有对比度。 */
     private static int bandColour = 0;
@@ -271,6 +328,7 @@ final class Beautify {
 
     private static void applyPageStructure(View v, int depth, int[] budget) {
         if (v == null || depth > 14 || budget[0] <= 0) return;
+        if (!clearAllowed()) return;   // 没图可铺、也没开全息 → 别清页面底（v1.7.12 黑屏根因之一）
         try {
             String n = nameOf(v);
             if (n.contains(S.BOUNCE)
@@ -312,6 +370,20 @@ final class Beautify {
     }
 
     // ── painting ──────────────────────────────────────────────────────────────
+
+    /**
+     * 全息透明（Holo）改完窗口属性后调一次：透明 Surface 刚生效，得重排 + 全量重绘一遍，
+     * 否则屏幕上留的是不透明那版旧帧（真机表现就是"内容叠三层"的残影）。
+     */
+    static void refresh(View decor) {
+        try {
+            if (decor == null) return;
+            paint(decor);
+            decor.invalidate();
+        } catch (Throwable ignored) {
+            // 仅外观
+        }
+    }
 
     private static void paint(View decor) {
         int sw = decor.getWidth();
@@ -378,6 +450,16 @@ final class Beautify {
 
         android.util.DisplayMetrics dm = decor.getResources().getDisplayMetrics();
         if (!ensureImage(decor.getContext().getFilesDir(), dm.widthPixels, dm.heightPixels)) {
+            // 用户把背景清掉了（或换的图这版解不出来）：手里没图，就必须把上一轮的残骸撤干净。
+            // 不撤的话旧壁纸一直挂在窗口上 —— 表现就是「背景删了还在」；而清过的底色又没人补 → 黑屏。
+            if (hasWallpaper()) dropWallpaper(decor);
+            // 全息透明开着时是例外：底下是系统桌面，清底正好透出来。
+            // 这条分支不能往下走（下面全是 imgBg 的几何运算），只做「清底」这一件事。
+            if (!Holo.on()) return;
+            applyPageStructure(decor, 0, new int[]{40});
+            if (Storage.on(K_ALL_PAGES, true)) {
+                clearOpaquePages(decor, 0, new int[]{400});
+            }
             return;
         }
 
@@ -432,6 +514,52 @@ final class Beautify {
             } catch (Throwable ignored) {
                 // 仅测量
             }
+        }
+    }
+
+    /**
+     * 把「我们画上去的东西」整批撤掉，宿主恢复原样（v1.7.12）。
+     *
+     * 触发条件只有一个：上一轮有壁纸、这一轮 {@link #ensureImage} 拿不到图了。
+     * 撤的时候必须连窗口背景一起还回去 —— 窗口那层是 {@link TopBandDrawable}，
+     * 不清的话旧图会一直盖在最底下，看着像"背景删不掉"。
+     */
+    private static void dropWallpaper(View decor) {
+        try {
+            imgBg = null;
+            imgBgOpaque = null;
+            imgKey = "";
+            // WeakHashMap 不能在遍历时被 GC 改结构，先拷一份强引用出来
+            for (View v : new java.util.ArrayList<View>(painted.keySet())) {
+                if (v == null) continue;
+                Drawable d = v.getBackground();
+                if (d instanceof BarDrawable || d instanceof TopBandDrawable) {
+                    setBackgroundSafely(v, null);
+                }
+            }
+            painted.clear();
+            barCache.clear();
+            sliceCache.clear();
+            sliceGeo.clear();
+            try {
+                if (decor.getContext() instanceof Activity) {
+                    android.view.Window w = ((Activity) decor.getContext()).getWindow();
+                    if (w != null) {
+                        int col = windowColour(decor, w);
+                        w.setBackgroundDrawable(
+                                new android.graphics.drawable.ColorDrawable(col));
+                    }
+                }
+            } catch (Throwable ignored) {
+                // 窗口拿不到就只撤 View 层
+            }
+            bgWin = null;
+            bandColour = 0;
+            bandH = -1;
+            navH = -1;
+            decor.invalidate();
+        } catch (Throwable ignored) {
+            // 仅外观
         }
     }
 
@@ -539,6 +667,7 @@ final class Beautify {
         //
         // 遍历便宜、清理才贵：只在清理时扣预算，深度给够。
         if (v == null || depth > 22 || budget[0] <= 0) return;
+        if (!clearAllowed()) return;   // 同上：清底的前提是背后确实有东西（壁纸或桌面）
         try {
             if (!v.isShown()) return;
             if (isPullDownPanel(v)) return;   // the drop-down panel keeps its own look
@@ -645,11 +774,20 @@ final class Beautify {
      * 图最大 16MB 上限：超过就是异常数据，宁可当没有背景也不要把微信内存吃满。
      */
     private static Bitmap decodeFromProvider(BitmapFactory.Options opts) {
+        return decodeUriFromProvider(BgProvider.uri(), opts);
+    }
+
+    /** 卡片图走同一条通道，只是换个路径（/card）。 */
+    private static Bitmap decodeCardFromProvider(BitmapFactory.Options opts) {
+        return decodeUriFromProvider(BgProvider.uriOf(BgProvider.PATH_CARD), opts);
+    }
+
+    private static Bitmap decodeUriFromProvider(android.net.Uri uri, BitmapFactory.Options opts) {
         InputStream in = null;
         try {
             android.content.Context ctx = Features.app;
             if (ctx == null) return null;
-            in = ctx.getContentResolver().openInputStream(BgProvider.uri());
+            in = ctx.getContentResolver().openInputStream(uri);
             if (in == null) return null;
             ByteArrayOutputStream bo = new ByteArrayOutputStream(256 * 1024);
             byte[] buf = new byte[16384];
@@ -665,6 +803,74 @@ final class Beautify {
             return null;
         } finally {
             try { if (in != null) in.close(); } catch (Throwable ignored) { }
+        }
+    }
+
+    /**
+     * 聊天条背景图（v1.7.10 接上）。
+     *
+     * 面板上「聊天条背景图 / 聊天条裁剪 / 聊天条模糊」三个键从 v1.7 起就存在、但代码里**零读取**
+     * ——正是审查里点名的假开关。这里把它们接成「一行一张烘焙好的图」：
+     *
+     *   解码（微信 files 里 ImagePicker 写的降级文件 → provider /card）→
+     *   按百分比裁剪（K_CARD_CX/CY/CW/CH）→ API31+ 真模糊（CardBlur）→ 缓存
+     *
+     * 缓存键包含 {@link #K_CARD_REV}：换图时面板写时间戳，下一次绑定行就会重新烘焙，
+     * 不需要重启微信。整条路径失败一律返回 null ⇒ 退回原来的纯色/玻璃卡片，不影响宿主。
+     *
+     * ★ 别把它挪回「壁纸」那条链：卡片图跟着列表滚动是刻意的（卡片本来就该跟内容走）。
+     */
+    private static Bitmap ensureCardImage() {
+        try {
+            String picked = Storage.str(K_CARD_IMG, "");
+            if (picked == null || picked.isEmpty()) {
+                imgCard = null;
+                imgCardKey = "";
+                return null;
+            }
+            int cx = Storage.num(K_CARD_CX, 0);
+            int cy = Storage.num(K_CARD_CY, 0);
+            int cw = Storage.num(K_CARD_CW, 100);
+            int ch = Storage.num(K_CARD_CH, 100);
+            boolean blurOn = Storage.on(K_CARD_BLUR_ON, false);
+            int blurR = clamp(Storage.num(K_CARD_BLUR_R, 20), 0, 80);
+            String key = cx + "," + cy + "," + cw + "," + ch
+                    + "|" + blurOn + ":" + blurR
+                    + "|" + Storage.str(K_CARD_REV, "");
+            if (key.equals(imgCardKey)) return imgCard;
+
+            Bitmap src = null;
+            try {
+                // 面板跑在微信进程里、provider 被包可见性封死时会写这个降级文件，优先级最高
+                File legacy = new File(Features.app.getFilesDir(), CARD_FILE);
+                if (legacy.isFile() && legacy.length() > 0) {
+                    src = BitmapFactory.decodeFile(legacy.getAbsolutePath());
+                }
+            } catch (Throwable ignored) {
+                // 读不到就走 provider
+            }
+            if (src == null) src = decodeCardFromProvider(null);
+            if (src == null) {
+                imgCard = null;          // 记下 key：这一版参数确实没图，别每行都重试解码
+                imgCardKey = key;
+                return null;
+            }
+
+            Bitmap made = cropPercent(src, cx, cy, cw, ch);
+            if (blurOn && blurR > 0 && made != null) {
+                if (Build.VERSION.SDK_INT >= 31) {
+                    float density = android.content.res.Resources.getSystem()
+                            .getDisplayMetrics().density;
+                    Bitmap blurred = CardBlur.blur(made, blurR * Math.max(1f, density));
+                    if (blurred != null) made = blurred;
+                }
+                // API 28~30 没有 RenderEffect：保持原图，面板上也写了「需要 API 31+」
+            }
+            imgCard = made;
+            imgCardKey = key;
+            return imgCard;
+        } catch (Throwable ignored) {
+            return imgCard;
         }
     }
 
@@ -759,6 +965,7 @@ final class Beautify {
 
     private static void slice(View v, int sw, int sh, int offX, int offY, int[] budget, int depth) {
         if (v == null || depth > 10 || budget[0] <= 0) return;
+        if (!hasWallpaper()) return;
         try {
             if (!v.isShown()) return;
             if (insideConversationList(v)) return;
@@ -1160,12 +1367,13 @@ final class Beautify {
                         if (OUR_CALL.get() != null) return;
                         if (!(p.thisObject instanceof View)) return;
                         View v = (View) p.thisObject;
-                        if (belongsToList(v)) {
+                        // 列表行只在卡片化开着时接管（卡片自己会补背景）；卡片关着就放行，让微信画它原本的白底。
+                        if (belongsToList(v) && Storage.on(K_CARD_ON, false)) {
                             p.setResult(null);
                             return;
                         }
                         // 栏有意不碰（见 isBarLike）。不透明的页面容器会挡住窗口背景，所以整体处理时按尺寸判断、可靠地清掉。
-                        if (!insideChatting(v) && Storage.on(K_ALL_PAGES, true)
+                        if (paintActive() && !insideChatting(v) && Storage.on(K_ALL_PAGES, true)
                                 && isPageSized(v)) {
                             Object arg = p.args.length > 0 ? p.args[0] : null;
                             if (arg instanceof Integer) {
@@ -1197,18 +1405,20 @@ final class Beautify {
                                 if (OUR_CALL.get() != null) return;
                                 if (!(p.thisObject instanceof View)) return;
                                 View v2 = (View) p.thisObject;
-                                if (belongsToList(v2)) {
+                                // 卡片化开着时列表行的底色由 CardDrawable 接；关着就必须让微信自己画（否则黑底黑字）
+                                if (belongsToList(v2) && Storage.on(K_CARD_ON, false)) {
                                     p.setResult(null);
                                     return;
                                 }
-                                if (!insideChatting(v2)
+                                if (paintActive() && !insideChatting(v2)
                                         && Storage.on(K_ALL_PAGES, true) && isPageSized(v2)) {
                                     p.setResult(null);
                                     return;
                                 }
                                 // 主页面上，任何宽视图上的不透明底板都直接拒掉：微信在滚动／重绑时会反复重画这些层，放行一次就盖住壁纸一帧（看起来就是背景在闪）。
-                                if (!insideChatting(v2) && isMainContext(v2.getContext())
-                                        && isWidePlate(v2)) {
+                                // 前提是我们真的有壁纸可铺（v1.7.12）；没有的话这里拒一次就是一块黑。
+                                if (paintActive() && !insideChatting(v2)
+                                        && isMainContext(v2.getContext()) && isWidePlate(v2)) {
                                     p.setResult(null);
                                 }
                                 // 会话页保留微信自己的标题栏：与它抢颜色（我们改写 vs 它重设）正是断续频闪的来源。
@@ -1237,7 +1447,8 @@ final class Beautify {
                                         < v2.getResources().getDisplayMetrics().widthPixels * 0.3f) {
                                     return;
                                 }
-                                if (Storage.on(K_ALL_PAGES, true) && !insideChatting(v2)) {
+                                if (Storage.on(K_ALL_PAGES, true) && paintActive()
+                                        && !insideChatting(v2)) {
                                     if (hasOpaqueSolidBackground(v2)) {
                                         setBackgroundSafely(v2, null);
                                     }
@@ -2048,8 +2259,11 @@ final class Beautify {
                 }
             }
             Drawable cur = row.getBackground();
-            if (!(cur instanceof CardDrawable) || !((CardDrawable) cur).matches(corner, alpha)) {
-                setBackgroundSafely(row, new CardDrawable(cardColour(), corner, alpha));
+            // 卡片图也在比较里：换图/改裁剪后 Key 变、Bitmap 实例变 ⇒ 下一帧就换掉，不用重启微信
+            Bitmap cardImg = panelOpen ? null : ensureCardImage();
+            if (!(cur instanceof CardDrawable)
+                    || !((CardDrawable) cur).matches(corner, alpha, cardImg)) {
+                setBackgroundSafely(row, new CardDrawable(cardColour(), corner, alpha, cardImg));
             }
             // 卡片在行上，但行自己的子视图又盖了不透明底板。通讯录行实测：往下一层是全尺寸 StateListDrawable，文字下面是九宫格面板
             if (row.getWidth() > 0 && row.getHeight() > 0 && !fillsStripped.containsKey(row)) {
@@ -2410,7 +2624,12 @@ final class Beautify {
         return 0xFFEDEDED;
     }
 
-    /** 做好的卡片：颜色和形状在创建时就烘焙好，绘制时不测量。故意不带图（带图的卡片会跟着列表动）。 */
+    /**
+     * 做好的卡片：颜色/图/形状在创建时就烘焙好，绘制时不测量。
+     *
+     * v1.7.10 起支持「每行一张图」：图是全局烘焙好的那一张（{@link #ensureCardImage()}），
+     * 绘制时只做一次 center-crop 缩放。图跟着列表滚动是刻意的——卡片本来就该跟内容走。
+     */
     private static final class CardDrawable extends Drawable {
         private final int colour;
         private final float corner;
@@ -2418,21 +2637,103 @@ final class Beautify {
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Path clip = new Path();
         private final RectF rect = new RectF();
+        /**
+         * v1.7：把面板上的「聊天条玻璃背景」真的接上。
+         *
+         * 这个开关以前在面板上存在、但代码里**零读取**（审查抓到的 6 个假开关之一），
+         * 打开没有任何效果。现在接成 {@link Glass} 的 L0 伪玻璃：零位图、零模糊，
+         * 每帧 3~4 个 drawRect，滚动时不重建 shader。
+         */
+        private final Glass glass;
+        /** 有图时玻璃让位：图打底 + 半透明，和玻璃叠在一起会糊成一层灰。 */
+        private final Bitmap image;
+        /**
+         * 窄行不铺图（v1.7.10 真机发现）：卡片化是挂在整个 adapter 上的，弹出对话框/选择框
+         * 用的也是 RecyclerView —— 那些行只有屏幕 72% 宽，铺上图之后选项文字压在棋盘格上看不清。
+         * 判据放在 draw 里用真实 bounds（不是绑定时的宽度），所以复用的行、旋转屏幕都不会判错。
+         */
+        private static final float MIN_IMAGE_ROW_RATIO = 0.8f;
+        private static final int SCREEN_W = android.content.res.Resources
+                .getSystem().getDisplayMetrics().widthPixels;
+        private final Paint imagePaint =
+                new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+        private android.graphics.BitmapShader imageShader;
+        private final android.graphics.Matrix imageMatrix = new android.graphics.Matrix();
+        private int lastW = -1;
+        private int lastH = -1;
+        private static final float DENSITY = android.content.res.Resources
+                .getSystem().getDisplayMetrics().density;
 
         CardDrawable(int colour, float corner, int alpha) {
+            this(colour, corner, alpha, null);
+        }
+
+        CardDrawable(int colour, float corner, int alpha, Bitmap image) {
             this.colour = colour;
             this.corner = corner;
             this.alpha = alpha;
+            this.image = image;
+            boolean glassOn = false;
+            try {
+                glassOn = Storage.on(K_CARD_GLASS, false);
+            } catch (Throwable ignored) {
+                // 读不到配置就按老样式画
+            }
+            this.glass = (glassOn && image == null)
+                    ? Glass.of(Glass.BASE_LIGHT, corner / Math.max(0.5f, DENSITY), alpha, DENSITY)
+                    : null;
         }
 
-        boolean matches(float cornerPx, int alphaValue) {
-            return this.corner == cornerPx && this.alpha == alphaValue;
+        boolean matches(float cornerPx, int alphaValue, Bitmap img) {
+            return this.corner == cornerPx && this.alpha == alphaValue && this.image == img;
+        }
+
+        /** center-crop：图铺满卡片、超出的部分居中裁掉。只在 bounds 变化时重建，滚动路径上零计算。 */
+        private void rebuildImageMatrix() {
+            float vw = rect.width();
+            float vh = rect.height();
+            int iw = image.getWidth();
+            int ih = image.getHeight();
+            if (iw <= 0 || ih <= 0) return;
+            if (imageShader == null) {
+                imageShader = new android.graphics.BitmapShader(
+                        image, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+                imagePaint.setShader(imageShader);
+            }
+            float s = Math.max(vw / iw, vh / ih);
+            float dx = rect.left + (vw - iw * s) / 2f;
+            float dy = rect.top + (vh - ih * s) / 2f;
+            imageMatrix.setScale(s, s);
+            imageMatrix.postTranslate(dx, dy);
+            imageShader.setLocalMatrix(imageMatrix);
+            lastW = (int) vw;
+            lastH = (int) vh;
         }
 
         @Override
         public void draw(Canvas c) {
             try {
                 rect.set(getBounds());
+                if (image != null && rect.width() >= SCREEN_W * MIN_IMAGE_ROW_RATIO
+                        && rect.height() > 0) {
+                    if ((int) rect.width() != lastW || (int) rect.height() != lastH) {
+                        rebuildImageMatrix();
+                    }
+                    clip.reset();
+                    clip.addRoundRect(rect, corner, corner, Path.Direction.CW);
+                    c.save();
+                    c.clipPath(clip);
+                    imagePaint.setAlpha(alpha);
+                    c.drawRect(rect, imagePaint);
+                    c.restore();
+                    return;
+                }
+                if (glass != null) {
+                    // 玻璃背景：直接交给 Glass 画（四层：体色/高光/内阴影/描边）
+                    glass.setBounds(getBounds());
+                    glass.draw(c);
+                    return;
+                }
                 clip.reset();
                 clip.addRoundRect(rect, corner, corner, Path.Direction.CW);
                 c.save();
@@ -2491,7 +2792,9 @@ final class Beautify {
                                         }
                                     });
                                 }
-                                if (!Storage.on(K_CORNER_ON, false)) return;
+                                // 没有壁纸就连圆角化也不做：整条外观链在「无图」状态下必须零干预宿主渲染。
+                                // （clipCorners 是 setClipToOutline ⇒ 离屏渲染，v1.3.3 已确认它是频闪/拖影的主源）
+                                if (!Storage.on(K_CORNER_ON, false) || !paintActive()) return;
                                 int radius = clamp(Storage.num(K_CORNER_DP, 12), 1, 40);
                                 // ★ 圆角化只在 decor 首次 layout 做一次。之前每次 onGlobalLayout（220ms 节流）都全树遍历
                                 //    clipCorners，滑动时新列表项不断被 setClipToOutline（离屏渲染）= 频闪 + 拖影。

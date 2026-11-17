@@ -1,48 +1,26 @@
-v1.6.3：三个「面板说好了、实际不工作」的功能真修好了
+v1.7.22：免 root 框架自审 —— 修掉三处「真机不生效」
 
-只修三个用户亲口报的功能：自动查看原图 / 骰子·猜拳 / 撤回标记。
-三个的共同症状完全一样：armed=1（hook 装上了）、hits=0（回调一次没被调用）。
+上一版给 LSPatch/NPatch 的适配有三处到真机就哑，这轮按"不卸载微信也能验"的方式重审并修：
 
-【自动查看原图】
-用户的现场观察是定位关键：自己在微信里正常点图不会下原图，但从别的 App 切回来、
-微信里已经开着图反而会触发。这说明触发点找错了 —— 原来只在 Activity.onResume 时
-才开始找「查看原图」按钮，而 8.0.80 在 App 内部点开图片**不会触发 Activity resume**
-（图片预览是在当前页面里换视图）。所以：正常点图不扫描，切回来才扫描。
-改成页面停留期间持续观察（resume 起 pause 停，600ms 一轮，最多 5 分钟兜底）。
-顺带修了两个具体问题：遍历上限 500 太小（现场数据「节点 501 · 候选 3」说明撞上限就停了）；
-候选被拒没有原因记录。
-真机：hits=10，20 个候选 / 1475 个节点，点图自动下原图。
+1. DexPathList.Element.path 是 File 不是 String，旧代码 instanceof String 在真机上必然跳过，
+   整段兜底是死代码（用本机 core-libart 的 dex 结构实测字段类型）。
+2. 集成模式没有独立模块 APK：LSPatch/NPatch 把模块塞进宿主 assets/lspatch|npatch/modules/，
+   旧的三条路全空。新增读宿主 assets（公开 API，内存解 zip），主题图与加密锚点表都能读。
+3. 「同 loader ⇒ 内嵌」在 Vector 下恒假（VectorModuleClassLoader + ByteBufferDexClassLoader），
+   免 root 会被报成 LSPosed 且缓存错值。改成注入产物优先、判不出来不缓存。
 
-【骰子/猜拳】三个 bug 叠在一起
-1. 判定方式失效：旧代码从第 4 个参数找 IEmojiInfo，8.0.80 那个参数变成 vr.u0
-   （Kotlin lambda，只有 int 字段）⇒ 永远判定不是游戏 ⇒ 选择框从不弹。
-   改成看第 3 个参数 kind id。真机确认 429=骰子。
-2. 入口只挂一个且挂错：同签名「(View,Context,int,cb)->void」在 8.0.80 有 14 处，
-   锚点表只给 yr.p，代码还只挑第一个。改成锚点类 + 同族 7 类全挂、每个方法都挂。
-3. 重放调错方法：放行时用静态字段 panelMethod，现在挂了十几个入口，它指向最后一个
-   挂上的而不是这次被拦的那个 ⇒ 重放等于没干。改用 param.method。
-真机：hits=2 · armed=2 · kind=429，选完能真的投出去。
+顺带修的静默失败：
+- 免 root 下语音导出先判模块组件可达，不再假装成功
+- Application.attach 不触发时用 onCreate 幂等兜底
+- 模块未独立安装时跳过 XSharedPreferences（attach 阶段同步、免 root 下没有模块 prefs）
+- PM 来源的锚点表做版本校验，避免读到旧版模块 APK 的表
+- 面板诊断行写清资源来源 / 探测记录 / 免 root 能力边界
 
-【撤回标记】
-原逻辑「绑定器挂成功就不挂适配器兜底」，但 8.0.80 上 jo.b#h 能挂上却一次没被调用
-（微信换了行绑定路径，老方法还在只是没人调）⇒ 两条路一起哑掉。
-另外适配器按名字找 onBindViewHolder，而 8.0.80 把它改名成 O。
-改成两条路都挂 + 按形状认 ViewHolder（返回 void、两参、第二个 int、第一个是
-ViewHolder 形状），不按名字 —— 微信把自带 androidx 也混淆了，RecyclerView$ViewHolder
-实际叫 androidx.recyclerview.widget.k3。
-真机：hits=52，气泡标签正常出现。
+文档：README 补框架兼容表与下载链接；免root使用指南重写（LSPatch/NPatch 步骤、能力边界）；
+新增 更新说明-v1.7.22.md。
 
-【顺手：让「为什么没生效」能被看见】
-Status.note 变更也置脏位；新增 Features.pushSoon()，诊断信息一有变化就立刻推
-（2 秒节流），不等 5 分钟窗口 —— 微信切后台就冻结，那个窗口可能永远等不到。
-现在 status.txt 里能看到：扫了几轮 / 扫了多少节点 / 几个候选 / 为什么没点 /
-最近进过哪些页面 / 面板 kind 是多少。
+验证：本机 framework dex 实测 + 两个框架管理器产物取证 + 伪造补丁包离线复现（正控/负控）；
+build.sh 全绿。1,898,780 B · sha256 08f93877…32bb4c2f。
+未验：真机打补丁（要卸载正版微信），面板 os= 与主题图显示以机主环境为准。
 
-【产物】
-dist/lexin.apk  686,292 B
-sha256 ac763bacbe7b96d484320d185761eb2d3a9d8970b15a14fadd2998b20f207d58
-version 1.6.3(48) · 真机已装
-
-【没验的】
-对方撤回的标签方向（selfRecall）没有真实样本，只验了自己撤回。
-上一版列的 8 条已知未修这版没动。
+本次提交同时带入 v1.7.0 ~ v1.7.21 的全部改动（此前只在本地）。

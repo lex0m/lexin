@@ -95,6 +95,16 @@ final class Anchors {
     // ── v1.3 悬浮聊天底栏 ──
     static final String CHAT_FOOTER = "chat_footer";
     // ── v1.3 批量分类标签 ──
+    /**
+     * ⚠ 不可信槽位（v1.7.3 真机实证）。
+     *
+     * 8.0.80 的 `com.tencent.mm.modelbase.s1` **不是网络队列**：它的方法是
+     * `nativeVsync` / `startHttpTaskFromNative` / `pagFramePresentedFromNative`，
+     * 属于 **XWeb 渲染内核**。挂在它上面的 hook 一次都不会命中（实测 armed=9 / hits=0）。
+     *
+     * 想找真正的 NetScene：类在 `com.tencent.mm.modelsimple` 包里，
+     * 特征是 `doScene(NetSceneQueue, Callbacks)I`（8.0.80 候选 n1 / l1，k0 是视频号 Finder）。
+     */
     static final String NET_SCENE_QUEUE = "net_scene_queue";
     static final String MM_KERNEL = "mm_kernel";
     static final String ADD_CONTACT_LABEL = "add_contact_label";
@@ -156,12 +166,16 @@ final class Anchors {
     private static volatile JSONObject learned;
     private static volatile boolean loaded = false;
     private static volatile boolean tableOk = false;
+    /** 已经尝试过几次 init（见 {@link #MAX_ATTEMPTS} 的注释）。 */
+    private static volatile int attempts = 0;
+    /** 重试上限：读表是纯内存/zip 操作，多试几次没有副作用；但也不能无限试（每次都要走一次 PackageManager 查询）。 */
+    private static final int MAX_ATTEMPTS = 4;
 
     static void init() {
         if (loaded) return;
         synchronized (LOCK) {
             if (loaded) return;
-            loaded = true;
+            attempts++;
             try {
                 String text = Assets.anchorText();   // v1.6：加密表优先，明文仅降级
                 if (text != null) {
@@ -174,9 +188,29 @@ final class Anchors {
                 Log.d(T + "table broken: " + t.getClass().getSimpleName());
             }
             learned = readLearned();
-            Log.d(T + "table=" + tableOk + " versions=" + knownVersions());
+            // ★ v1.7 修（C-01）：以前这里无条件 loaded=true —— 只要第一次没读到表
+            //   （典型场景：免 root 内嵌模式下 getApplicationInfo 拿不到模块路径、initZygote 也没被调），
+            //   本进程就**永久**认定"没有锚点表"，后面 AutoScan 扫完补装读到的还是空表，
+            //   于是全部功能静默哑掉、没有任何自愈机会（正是"面板全绿、功能全哑"的底层原因之一）。
+            //   现在：读到表就封口；没读到就留着下次再试，试满 MAX_ATTEMPTS 才放弃。
+            if (tableOk || attempts >= MAX_ATTEMPTS) loaded = true;
+            Log.d(T + "table=" + tableOk + " attempts=" + attempts + " versions=" + knownVersions());
         }
     }
+
+    /**
+     * 强制再试一次读表（AutoScan 扫完、换 loader、配置到位时调用）。
+     *
+     * 为什么需要独立入口：{@link #init()} 的封口判断在 synchronized 里，
+     * 调用方没法自己判断"要不要重试"，只能通过这个入口表达"现在的环境变了，值得再读一次"。
+     */
+    static void retry() {
+        if (tableOk) return;
+        loaded = false;
+        attempts = Math.max(0, attempts - 1);   // 不让一次 retry 白吃掉一次配额
+        init();
+    }
+
 
     // ── 解析 ────────────────────────────────────────────────────────────────
 
@@ -227,8 +261,66 @@ final class Anchors {
         }
         out = verifyAll(slot, learnedName(slot), "learned");
         if (!out.isEmpty()) return out;
+        // v1.7.9：DexKit 按特征串现找（wcx / WeKit 的核心做法）。
+        // 只在"当前版本表里没有这个槽位"时启用 —— 见 dexCandidates 里的安全阀说明。
+        out = verifyAll(slot, dexCandidates(slot), "dexkit");
+        if (!out.isEmpty()) return out;
         out = verifyAll(slot, AutoScan.candidates(slot), "scan");
         return out;
+    }
+
+    /** DexKit 兜底的进程内预算（见 {@link #dexCandidates(String)}）。 */
+    private static final java.util.concurrent.atomic.AtomicInteger DEX_BUDGET =
+            new java.util.concurrent.atomic.AtomicInteger(8);
+
+    /**
+     * DexKit 兜底候选（v1.7.9）。
+     *
+     * 借 wcx / WeKit 的核心做法：**不靠版本号表，按字符串特征在运行时 dex 里现找**。
+     * 他们能在 8.0.8x 上跑，靠的就是这一条，而不是维护一张越写越长的版本映射。
+     *
+     * ★ 安全阀（很重要）：
+     *   ① 只有「当前微信版本在这份表里**没有**该槽位」时才启用。
+     *      现役版本的映射是逐版人工验过的，绝不能让 DexKit 去覆盖；
+     *   ② 只对 anchors.json 里**带 strings** 的槽位生效（40 个里 25 个有）；
+     *   ③ DexKit 只返回类名、不含方法名 —— 对"类对、方法搬了"的槽位，
+     *      {@link #entryWithMethod(String)} 会拿不到方法而**安全失败**，不会挂错。
+     */
+    private static List<String> dexCandidates(String slot) {
+        try {
+            if (versions != null) {
+                JSONObject v = versions.optJSONObject(WxVersion.name());
+                JSONObject s = v == null ? null : v.optJSONObject("slots");
+                if (s != null && s.opt(slot) != null) return new ArrayList<>();   // 表里有 → 不碰
+            }
+            JSONObject def = rules == null ? null : rules.optJSONObject(slot);
+            if (def == null) return new ArrayList<>();
+            JSONArray arr = def.optJSONArray("strings");
+            if (arr == null || arr.length() == 0) return new ArrayList<>();
+            List<String> want = new ArrayList<>();
+            for (int i = 0; i < arr.length(); i++) {
+                String s = arr.optString(i, null);
+                if (s != null && !s.isEmpty()) want.add(s);
+            }
+            if (want.isEmpty()) return new ArrayList<>();
+            // 预算闸：一次启动最多试 DEX_BUDGET 个槽位。老版本用户（表里没有他那版）
+            // 否则会把每个缺失槽位都扫一遍，25 × ~300ms 就是启动明显变慢。
+            if (DEX_BUDGET.decrementAndGet() < 0) {
+                DEX_BUDGET.incrementAndGet();
+                return new ArrayList<>();
+            }
+            String pkg = def.optString("pkg", "");
+            // exact=false：锚点表里的 strings 是**日志前缀片段**（如 "doRevokeMsg revokeFlag="），
+            // 用 usingEqStrings 精确匹配必然 0 命中（真机验证过一次，兜底链看着跑完其实没找着）。
+            List<String> found = DexFind.findClasses(Features.loader,
+                    pkg == null || pkg.isEmpty() ? null : pkg, false,
+                    want.toArray(new String[0]));
+            if (!found.isEmpty()) Log.d(T + "dexkit " + slot + " -> " + found);
+            return found;
+        } catch (Throwable t) {
+            Log.d(T + "dexkit failed " + slot + ": " + t.getClass().getSimpleName());
+            return new ArrayList<>();
+        }
     }
 
     private static List<String> fromVersion(String slot, String version) {
@@ -578,6 +670,68 @@ final class Anchors {
     static String source(String slot) {
         String s = source.get(slot);
         return s == null ? "-" : s;
+    }
+
+    /**
+     * 各解析来源的计数（v1.7.9）。
+     *
+     * 写进 status.txt 头部，回答一个以前只能翻日志才知道的问题：
+     * **这些类名到底是从静态表来的，还是 DexKit 现找的？**
+     *
+     * 现在尤其重要：DexKit 兜底是新加的一档，没有这个计数就无法证明它真的接管过。
+     * 归类规则：`table` / `learned` / `dexkit` / `scan` 原样，其余（形如 8.0.79）都算 near by 回退。
+     */
+    static String sourceSummary() {
+        try {
+            int table = 0, near = 0, learnedN = 0, dex = 0, scan = 0;
+            for (Map.Entry<String, String> e : source.entrySet()) {
+                String v = e.getValue();
+                if (v == null) continue;
+                if ("table".equals(v)) table++;
+                else if ("dexkit".equals(v)) dex++;
+                else if ("learned".equals(v)) learnedN++;
+                else if ("scan".equals(v)) scan++;
+                else near++;
+            }
+            StringBuilder sb = new StringBuilder();
+            if (table > 0) sb.append("table").append(table);
+            if (near > 0) sb.append(sb.length() > 0 ? "," : "").append("nearby").append(near);
+            if (learnedN > 0) sb.append(sb.length() > 0 ? "," : "").append("learned").append(learnedN);
+            if (dex > 0) sb.append(sb.length() > 0 ? "," : "").append("dexkit").append(dex);
+            if (scan > 0) sb.append(sb.length() > 0 ? "," : "").append("scan").append(scan);
+            return sb.length() == 0 ? "none" : sb.toString();
+        } catch (Throwable t) {
+            return "?";
+        }
+    }
+
+    /**
+     * 诊断导出用：逐功能列出槽位命中情况（面板只给摘要，摘要看不出「哪个槽位没解析到」）。
+     * 一行一个功能，✔/✘ 后面跟槽位名。
+     */
+    static String detail() {
+        StringBuilder sb = new StringBuilder(1024);
+        try {
+            for (String[] f : FEATURES) {
+                sb.append(f[0]).append(": ");
+                boolean any = false;
+                for (int i = 1; i < f.length; i++) {
+                    boolean yes = false;
+                    try {
+                        yes = ok(f[i]);
+                    } catch (Throwable ignored) {
+                        // 单槽位失败继续
+                    }
+                    sb.append(yes ? "\u2714" : "\u2718").append(f[i]).append(' ');
+                    any |= yes;
+                }
+                if (!any) sb.append("（未命中）");
+                sb.append('\n');
+            }
+        } catch (Throwable t) {
+            sb.append("槽位详情读取失败: ").append(t.getClass().getSimpleName()).append('\n');
+        }
+        return sb.toString();
     }
 
     /** 面板顶部的适配摘要。 */

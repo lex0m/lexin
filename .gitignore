@@ -38,3 +38,9 @@ seq-*.png
 idle-*.png
 verify-*.png
 gh-*.png
+
+# 本地临时文件 / Python 缓存 / 资源备份
+.tmp-*
+__pycache__/
+*.pyc
+*.bak-*
