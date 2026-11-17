@@ -1,26 +1,7 @@
-v1.7.22：免 root 框架自审 —— 修掉三处「真机不生效」
+文档：新增免 root 新手教程，README 与指南互链
 
-上一版给 LSPatch/NPatch 的适配有三处到真机就哑，这轮按"不卸载微信也能验"的方式重审并修：
+面向第一次装的人：备份聊天记录 → 装管理器 → 装乐信 → 打补丁 → 换包 → 确认生效。
+每一步写清"看到什么算对、出错怎么办"，LSPatch / NPatch 两套步骤都给，
+最后附能力边界（免 root 下哪几项用不了）、10 条常见问题和一张流程速查。
 
-1. DexPathList.Element.path 是 File 不是 String，旧代码 instanceof String 在真机上必然跳过，
-   整段兜底是死代码（用本机 core-libart 的 dex 结构实测字段类型）。
-2. 集成模式没有独立模块 APK：LSPatch/NPatch 把模块塞进宿主 assets/lspatch|npatch/modules/，
-   旧的三条路全空。新增读宿主 assets（公开 API，内存解 zip），主题图与加密锚点表都能读。
-3. 「同 loader ⇒ 内嵌」在 Vector 下恒假（VectorModuleClassLoader + ByteBufferDexClassLoader），
-   免 root 会被报成 LSPosed 且缓存错值。改成注入产物优先、判不出来不缓存。
-
-顺带修的静默失败：
-- 免 root 下语音导出先判模块组件可达，不再假装成功
-- Application.attach 不触发时用 onCreate 幂等兜底
-- 模块未独立安装时跳过 XSharedPreferences（attach 阶段同步、免 root 下没有模块 prefs）
-- PM 来源的锚点表做版本校验，避免读到旧版模块 APK 的表
-- 面板诊断行写清资源来源 / 探测记录 / 免 root 能力边界
-
-文档：README 补框架兼容表与下载链接；免root使用指南重写（LSPatch/NPatch 步骤、能力边界）；
-新增 更新说明-v1.7.22.md。
-
-验证：本机 framework dex 实测 + 两个框架管理器产物取证 + 伪造补丁包离线复现（正控/负控）；
-build.sh 全绿。1,898,780 B · sha256 08f93877…32bb4c2f。
-未验：真机打补丁（要卸载正版微信），面板 os= 与主题图显示以机主环境为准。
-
-本次提交同时带入 v1.7.0 ~ v1.7.21 的全部改动（此前只在本地）。
+README 顶部导航与安装章节加教程入口；进阶指南顶部加新手版链接。

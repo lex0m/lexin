@@ -12,7 +12,7 @@
 
 包名 `io.github.lex0m.lexin` · 作者 lex · 纯 Java · 无 Gradle
 
-[下载](../../releases) · [功能一览](#功能一览) · [安装](#安装) · [兼容性](#兼容性) · [设计取舍](#设计取舍)
+[下载](../../releases) · [免 root 新手教程](免root新手指南.md) · [功能一览](#功能一览) · [安装](#安装) · [兼容性](#兼容性) · [设计取舍](#设计取舍)
 
 </div>
 
@@ -86,7 +86,8 @@
 > 没 root 就走免 root 框架，二选一（同一条技术路线，都是 Vector 核）：
 > **[LSPatch（JingMatrix fork）](https://github.com/JingMatrix/LSPatch/releases)** ·
 > **[NPatch（7723mod fork）](https://github.com/7723mod/NPatch/releases)**。
-> 代价是要重装微信（签名变了），步骤与能力边界见 [免 root 使用指南](免root使用指南.md)。
+> 代价是要重装微信（签名变了）。第一次装看 [免 root 新手教程](免root新手指南.md)（照着点就行），
+> 进阶的能力边界与排查看 [免 root 使用指南](免root使用指南.md)。
 
 ## 打开面板
 
@@ -110,7 +111,8 @@
 | 双开容器 / 虚拟机 | 不建议 | 容器特征明显，主号别用 |
 
 免 root 下没有独立模块进程：**语音转 MP3、独立设置页、开机自启不可用**，其余功能照常；
-面板诊断行会写明当前框架与素材来源。详细步骤见 [免 root 使用指南](免root使用指南.md)。
+面板诊断行会写明当前框架与素材来源。
+第一次装 → [免 root 新手教程](免root新手指南.md)；能力边界与排查 → [免 root 使用指南](免root使用指南.md)。
 
 ### Android
 
